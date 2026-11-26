@@ -74,7 +74,9 @@ Deno.serve(async (req: Request) => {
       const { count } = await adminClient.from("profiles").select("id", { count: "exact", head: true }).eq("role", "administrador");
       if ((count || 0) <= 1) return json({ error: "No puedes quitar el rol al último administrador." }, 400);
     }
-    const authUpdates: { email: string; user_metadata: { full_name: string }; password?: string } = { email, user_metadata: { full_name: fullName } };\n    if (body.password) { if (body.password.length < 12) return json({ error: "La contraseña debe tener al menos 12 caracteres." }, 400); authUpdates.password = body.password; }\n    const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetId, authUpdates);
+    const authUpdates: { email: string; user_metadata: { full_name: string }; password?: string } = { email, user_metadata: { full_name: fullName } };
+    if (body.password) { if (body.password.length < 12) return json({ error: "La contraseña debe tener al menos 12 caracteres." }, 400); authUpdates.password = body.password; }
+    const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetId, authUpdates);
     if (authUpdateError) return json({ error: authUpdateError.message }, 400);
     const { error: profileUpdateError } = await adminClient.from("profiles").update({ email, full_name: fullName, role }).eq("id", targetId);
     if (profileUpdateError) return json({ error: profileUpdateError.message }, 500);

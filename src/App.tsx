@@ -106,7 +106,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     async function loadClients() {
-      if (!supabase || !session || !profile || page !== 'clientes') return;
+      if (!supabase || !session || !profile || (page !== 'clientes' && page !== 'inicio')) return;
       setClientsLoading(true);
       const { data, error: clientsError } = await supabase
         .from('clients')

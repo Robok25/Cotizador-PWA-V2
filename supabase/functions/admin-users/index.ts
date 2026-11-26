@@ -29,9 +29,28 @@ Deno.serve(async (req: Request) => {
   const { data: profile, error: profileError } = await adminClient.from("profiles").select("role").eq("id", user.id).single();
   if (profileError || profile?.role !== "administrador") return json({ error: "Se requieren permisos de administrador." }, 403);
 
-  let body: { action?: string; email?: string; full_name?: string; role?: string; user_id?: string };
+  let body: { action?: string; email?: string; full_name?: string; role?: string; user_id?: string; password?: string };
   try { body = await req.json(); } catch { return json({ error: "Solicitud inválida." }, 400); }
-  if (!["invite", "update", "delete"].includes(body.action || "")) return json({ error: "Acción no soportada." }, 400);
+  if (!["create", "update", "delete"].includes(body.action || "")) return json({ error: "Acción no soportada." }, 400);
+
+  if (body.action === "create") {
+    const email = body.email?.trim().toLowerCase();
+    const fullName = body.full_name?.trim();
+    const password = body.password || "";
+    const role = body.role === "administrador" ? "administrador" : "vendedor";
+    if (!email || !fullName || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return json({ error: "Indica nombre y correo válidos." }, 400);
+    if (password.length < 12) return json({ error: "La contraseña inicial debe tener al menos 12 caracteres." }, 400);
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email, password, email_confirm: true, user_metadata: { full_name: fullName },
+    });
+    if (error || !data.user) return json({ error: error?.message || "No se pudo crear el usuario." }, 400);
+    const { error: profileUpdateError } = await adminClient.from("profiles").update({ email, full_name: fullName, role }).eq("id", data.user.id);
+    if (profileUpdateError) {
+      await adminClient.auth.admin.deleteUser(data.user.id);
+      return json({ error: "No se pudo asignar el rol; se revirtió la creación. " + profileUpdateError.message }, 500);
+    }
+    return json({ success: true, created: data.user.id });
+  }
 
   if (body.action === "delete") {
     const targetId = body.user_id;
@@ -55,7 +74,7 @@ Deno.serve(async (req: Request) => {
       const { count } = await adminClient.from("profiles").select("id", { count: "exact", head: true }).eq("role", "administrador");
       if ((count || 0) <= 1) return json({ error: "No puedes quitar el rol al último administrador." }, 400);
     }
-    const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetId, { email, user_metadata: { full_name: fullName } });
+    const authUpdates: { email: string; user_metadata: { full_name: string }; password?: string } = { email, user_metadata: { full_name: fullName } };\n    if (body.password) { if (body.password.length < 12) return json({ error: "La contraseña debe tener al menos 12 caracteres." }, 400); authUpdates.password = body.password; }\n    const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetId, authUpdates);
     if (authUpdateError) return json({ error: authUpdateError.message }, 400);
     const { error: profileUpdateError } = await adminClient.from("profiles").update({ email, full_name: fullName, role }).eq("id", targetId);
     if (profileUpdateError) return json({ error: profileUpdateError.message }, 500);

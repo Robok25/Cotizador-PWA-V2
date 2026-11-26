@@ -29,9 +29,33 @@ Deno.serve(async (req: Request) => {
   const { data: profile, error: profileError } = await adminClient.from("profiles").select("role").eq("id", user.id).single();
   if (profileError || profile?.role !== "administrador") return json({ error: "Se requieren permisos de administrador." }, 403);
 
-  let body: { action?: string; email?: string; full_name?: string; role?: string };
+  let body: { action?: string; email?: string; full_name?: string; role?: string; user_id?: string };
   try { body = await req.json(); } catch { return json({ error: "Solicitud inválida." }, 400); }
-  if (body.action !== "invite") return json({ error: "Acción no soportada." }, 400);
+  if (!["invite", "update", "delete"].includes(body.action || "")) return json({ error: "Acción no soportada." }, 400);
+
+  if (body.action === "delete") {
+    const targetId = body.user_id;
+    if (!targetId || targetId === user.id) return json({ error: "No puedes eliminar tu propio usuario." }, 400);
+    const { count } = await adminClient.from("profiles").select("id", { count: "exact", head: true }).eq("role", "administrador");
+    const { data: target } = await adminClient.from("profiles").select("role").eq("id", targetId).maybeSingle();
+    if (target?.role === "administrador" && (count || 0) <= 1) return json({ error: "No puedes eliminar al último administrador." }, 400);
+    const { error } = await adminClient.auth.admin.deleteUser(targetId);
+    if (error) return json({ error: error.message }, 400);
+    return json({ success: true, deleted: targetId });
+  }
+
+  if (body.action === "update") {
+    const targetId = body.user_id;
+    const email = body.email?.trim().toLowerCase();
+    const fullName = body.full_name?.trim();
+    const role = body.role === "administrador" ? "administrador" : "vendedor";
+    if (!targetId || !email || !fullName || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return json({ error: "Indica nombre y correo válidos." }, 400);
+    const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetId, { email, user_metadata: { full_name: fullName } });
+    if (authUpdateError) return json({ error: authUpdateError.message }, 400);
+    const { error: profileUpdateError } = await adminClient.from("profiles").update({ email, full_name: fullName, role }).eq("id", targetId);
+    if (profileUpdateError) return json({ error: profileUpdateError.message }, 500);
+    return json({ success: true, updated: targetId });
+  }
 
   const email = body.email?.trim().toLowerCase();
   const fullName = body.full_name?.trim();

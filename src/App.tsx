@@ -79,6 +79,9 @@ export default function App() {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [requestsRefresh, setRequestsRefresh] = useState(0);
   const [usersLoading, setUsersLoading] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
@@ -176,6 +179,22 @@ export default function App() {
   }, [session, profile, page]);
 
   useEffect(() => {
+    const client = supabase;
+    if (!client || !session || role !== 'administrador') { setPendingRequestCount(0); return; }
+    let active = true;
+    const refreshPendingCount = async () => {
+      const { count, error: countError } = await client.from('registration_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+      if (active && !countError) setPendingRequestCount(count || 0);
+    };
+    void refreshPendingCount();
+    const interval = window.setInterval(refreshPendingCount, 30000);
+    const channel = client.channel('registration-requests-notifications')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'registration_requests' }, () => { void refreshPendingCount(); })
+      .subscribe();
+    return () => { active = false; window.clearInterval(interval); void client.removeChannel(channel); };
+  }, [session, role]);
+
+  useEffect(() => {
     let active = true;
     async function loadUsers() {
       if (!supabase || !session || role !== 'administrador' || page !== 'usuarios') return;
@@ -193,7 +212,7 @@ export default function App() {
     }
     void loadUsers();
     return () => { active = false; };
-  }, [session, role, page]);
+  }, [session, role, page, requestsRefresh]);
 
   const filteredMaterials = useMemo(() => {
     const term = materialSearch.trim().toLocaleLowerCase();
@@ -288,7 +307,7 @@ export default function App() {
     if (e || data?.error) setError('No se pudo guardar el usuario: ' + (data?.error || e?.message));
     else {
       if (editingUser) setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
-      if (!editingUser && selectedRequestId) { await supabase.from('registration_requests').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', selectedRequestId); setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item)); }
+      if (!editingUser && selectedRequestId) { await supabase.from('registration_requests').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', selectedRequestId); setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item)); setPendingRequestCount(count => Math.max(0, count - 1)); }
       setSelectedRequestId(null); setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
       setError(editingUser ? 'Usuario actualizado.' : 'Cuenta creada. Entrega al usuario su correo y contraseña inicial por un canal seguro.');
     }
@@ -300,7 +319,7 @@ export default function App() {
     setBusy(true); setError('');
     const { error: updateError } = await supabase.from('registration_requests').update({ status, reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', request.id);
     if (updateError) setError('No se pudo actualizar la solicitud: ' + updateError.message);
-    else setRegistrationRequests(items => items.map(item => item.id === request.id ? { ...item, status } : item));
+    else { setRegistrationRequests(items => items.map(item => item.id === request.id ? { ...item, status } : item)); setPendingRequestCount(count => Math.max(0, count - 1)); }
     setBusy(false);
   }
 
@@ -389,7 +408,7 @@ export default function App() {
                 setBusy(true); setError('');
                 const { data, error: requestError } = await supabase.functions.invoke('registration-requests', { body: { full_name: requestName, email: requestEmail, company: requestCompany, reason: requestReason, website: requestWebsite } });
                 if (requestError || data?.error) setError(data?.error || requestError?.message || 'No se pudo enviar la solicitud.');
-                else { setError(data?.email_sent === false ? 'Tu solicitud quedó registrada. El aviso por correo está pendiente de configuración; el administrador podrá revisarla en la plataforma.' : 'Solicitud enviada. El administrador recibió tus datos para revisar el acceso.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
+                else { setError('Solicitud registrada. El administrador recibirá una notificación dentro de ConveyorQuote y podrá revisar tu acceso desde Administración → Usuarios.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
                 setBusy(false);
               }}>
                 <label>Nombre completo *</label><input value={requestName} onChange={e=>setRequestName(e.target.value)} required maxLength={120}/>
@@ -454,7 +473,7 @@ export default function App() {
         <header>
           <button className="hamb" aria-label="Abrir menú" onClick={() => setMobile(true)}><Menu/></button>
           <span>ConveyorQuote　/　<b>{title}</b></span>
-          <div className="top"><small className="connected">● Conectado</small><Bell/><i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
+          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap"><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{pendingRequestCount > 0 ? <><p>{pendingRequestCount === 1 ? 'Tienes una solicitud de acceso pendiente.' : `Tienes ${pendingRequestCount} solicitudes de acceso pendientes.`}</p><button type="button" className="primary" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Revisar solicitudes <ArrowRight/></button></> : <p>No tienes solicitudes pendientes.</p>}</div>}</div>}<i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
         </header>
         <div className="content">
           {error && <div className="error-message page-error">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}

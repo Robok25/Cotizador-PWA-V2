@@ -14,7 +14,7 @@ type Role = 'vendedor' | 'administrador';
 type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion' | 'banda-modular' | 'perfil';
 type Profile = { role: Role; full_name: string | null; phone?: string | null };
 type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };
-type RegistrationRequest = { id: string; full_name: string; email: string; company: string | null; reason: string | null; status: 'pending' | 'approved' | 'rejected'; created_at: string };
+type RegistrationRequest = { id: string; full_name: string; email: string; company: string | null; reason: string | null; status: 'pending' | 'approved' | 'rejected'; created_at: string; read_at?: string | null };
 type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
 type Client = {
   id: string;
@@ -78,8 +78,10 @@ export default function App() {
   const [notes, setNotes] = useState('');
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);
+  const [unreadRequests, setUnreadRequests] = useState<RegistrationRequest[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
+  const [userFormError, setUserFormError] = useState('');
   const [notificationOpen, setNotificationOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
   const [requestsRefresh, setRequestsRefresh] = useState(0);
@@ -206,8 +208,14 @@ export default function App() {
     if (!client || !session || role !== 'administrador') { setPendingRequestCount(0); return; }
     let active = true;
     const refreshPendingCount = async () => {
-      const { count, error: countError } = await client.from('registration_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending');
-      if (active && !countError) setPendingRequestCount(count || 0);
+      const { data, error: countError } = await client.from('registration_requests')
+        .select('id, full_name, email, company, reason, status, created_at, read_at')
+        .eq('status', 'pending').is('read_at', null).order('created_at', { ascending: false });
+      if (active && !countError) {
+        const unread = (data || []) as RegistrationRequest[];
+        setUnreadRequests(unread);
+        setPendingRequestCount(unread.length);
+      }
     };
     void refreshPendingCount();
     const interval = window.setInterval(refreshPendingCount, 30000);
@@ -224,7 +232,7 @@ export default function App() {
       setUsersLoading(true);
       const [{ data, error: usersError }, { data: requests, error: requestsError }] = await Promise.all([
         supabase.from('profiles').select('id, email, full_name, role, created_at').order('created_at', { ascending: false }),
-        supabase.from('registration_requests').select('id, full_name, email, company, reason, status, created_at').order('created_at', { ascending: false }),
+        supabase.from('registration_requests').select('id, full_name, email, company, reason, status, created_at, read_at').order('created_at', { ascending: false }),
       ]);
       if (!active) return;
       if (usersError) setError('No se pudieron cargar los usuarios: ' + usersError.message);
@@ -319,22 +327,73 @@ export default function App() {
   }
 
   function openUser(user?: UserRecord) {
-    setEditingUser(user || null); setNewUserEmail(user?.email || ''); setNewUserName(user?.full_name || ''); setNewUserRole(user?.role || 'vendedor'); setUserModal(true);
+    setEditingUser(user || null); setNewUserEmail(user?.email || ''); setNewUserName(user?.full_name || ''); setNewUserRole(user?.role || 'vendedor'); setUserFormError(''); setUserModal(true);
   }
 
   async function handleInviteUser(event: FormEvent) {
-    event.preventDefault(); if (!supabase || role !== 'administrador') return;
-    setBusy(true); setError('');
-    const body = editingUser ? { action: 'update', user_id: editingUser.id, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole, password: newUserPassword || undefined } : { action: 'create', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole, password: newUserPassword };
-    const { data, error: e } = await supabase.functions.invoke('admin-users', { body });
-    if (e || data?.error) setError('No se pudo guardar el usuario: ' + (data?.error || e?.message));
-    else {
-      if (editingUser) setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
-      if (!editingUser && selectedRequestId) { await supabase.from('registration_requests').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', selectedRequestId); setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item)); setPendingRequestCount(count => Math.max(0, count - 1)); }
-      setSelectedRequestId(null); setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
-      setError(editingUser ? 'Usuario actualizado.' : 'Cuenta creada. Entrega al usuario su correo y contraseña inicial por un canal seguro.');
+    event.preventDefault();
+    if (!supabase || role !== 'administrador') return;
+    setBusy(true);
+    setUserFormError('');
+    try {
+      const body = editingUser
+        ? { action: 'update', user_id: editingUser.id, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole, password: newUserPassword || undefined }
+        : { action: 'create', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole, password: newUserPassword };
+      const { data, error: invokeError } = await supabase.functions.invoke('admin-users', { body });
+      if (invokeError || data?.error || data?.success !== true) {
+        let detail = data?.error || invokeError?.message || 'El servidor no confirmó la creación del usuario.';
+        const context = invokeError && 'context' in invokeError ? invokeError.context : null;
+        if (context instanceof Response) {
+          const responseBody = await context.clone().json().catch(() => null) as { error?: string; message?: string } | null;
+          if (responseBody?.error || responseBody?.message) detail = responseBody.error || responseBody.message || detail;
+          else detail += ` (HTTP ${context.status})`;
+        }
+        setUserFormError('No se pudo guardar el usuario: ' + detail);
+        return;
+      }
+
+      if (editingUser) {
+        setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
+      } else if (selectedRequestId) {
+        const { error: requestUpdateError } = await supabase.from('registration_requests')
+          .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id })
+          .eq('id', selectedRequestId);
+        if (requestUpdateError) setError('La cuenta se creó, pero no se pudo actualizar el estado de la solicitud: ' + requestUpdateError.message);
+        else setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item));
+      }
+
+      setSelectedRequestId(null);
+      setUserModal(false);
+      setEditingUser(null);
+      setNewUserEmail('');
+      setNewUserName('');
+      setNewUserRole('vendedor');
+      setNewUserPassword('');
+      setUserFormError('');
+      setRequestsRefresh(value => value + 1);
+      if (!editingUser) setError('Cuenta creada. Entrega al usuario su correo y contraseña inicial por un canal seguro.');
+      else setError('Usuario actualizado.');
+    } catch (unexpectedError) {
+      const detail = unexpectedError instanceof Error ? unexpectedError.message : String(unexpectedError);
+      setUserFormError('No se pudo completar la operación: ' + detail);
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
+  }
+
+  async function openRegistrationNotification(request: RegistrationRequest) {
+    if (!supabase) return;
+    setNotificationOpen(false);
+    const { error: readError } = await supabase.from('registration_requests')
+      .update({ read_at: new Date().toISOString() }).eq('id', request.id).is('read_at', null);
+    if (readError) {
+      setError('No se pudo marcar la notificación como leída: ' + readError.message);
+      return;
+    }
+    setUnreadRequests(items => items.filter(item => item.id !== request.id));
+    setPendingRequestCount(count => Math.max(0, count - 1));
+    setRequestsRefresh(value => value + 1);
+    setPage('usuarios');
   }
 
   async function handleRequestStatus(request: RegistrationRequest, status: 'approved' | 'rejected') {
@@ -505,7 +564,7 @@ export default function App() {
         <header>
           <button className="hamb" aria-label="Abrir menú" onClick={() => setMobile(true)}><Menu/></button>
           <span>ConveyorQuote　/　<b>{title}</b></span>
-          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap" ref={notificationRef}><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{pendingRequestCount > 0 ? <><p>{pendingRequestCount === 1 ? 'Tienes una solicitud de acceso pendiente.' : `Tienes ${pendingRequestCount} solicitudes de acceso pendientes.`}</p><button type="button" className="primary" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Revisar solicitudes <ArrowRight/></button></> : <p>No tienes solicitudes pendientes.</p>}</div>}</div>}<i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
+          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap" ref={notificationRef}><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{unreadRequests.length > 0 ? <div className="notification-list">{unreadRequests.map(request => <button type="button" className="notification-item" key={request.id} onClick={() => void openRegistrationNotification(request)}><span><strong>{request.full_name}</strong><small>{request.email}</small></span><ArrowRight/></button>)}</div> : <p>No tienes notificaciones nuevas.</p>}<button type="button" className="notification-link" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Ver todas las solicitudes <ArrowRight/></button></div>}</div>}<i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
         </header>
         <div className="content">
           {error && <div className="error-message page-error">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}
@@ -588,7 +647,7 @@ export default function App() {
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>
       </main>
-      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setUserModal(false)}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p>{editingUser ? 'Actualiza sus datos, permisos y, si es necesario, restablece su contraseña.' : 'Define las credenciales iniciales. La contraseña debe tener al menos 12 caracteres.'}</p><label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial *'}</label><input type="password" autoComplete="new-password" minLength={12} value={newUserPassword} onChange={event => setNewUserPassword(event.target.value)} required={!editingUser} placeholder="Mínimo 12 caracteres"/><label>Rol</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim() || (!editingUser && newUserPassword.length<12)}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'} <Check/></button></form></div>}
+      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => !busy && setUserModal(false)} disabled={busy}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p>{editingUser ? 'Actualiza sus datos, permisos y, si es necesario, restablece su contraseña.' : 'Define las credenciales iniciales. La contraseña debe tener al menos 12 caracteres.'}</p>{userFormError && <div className="error-message">{userFormError}</div>}<label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial *'}</label><input type="password" autoComplete="new-password" minLength={12} value={newUserPassword} onChange={event => setNewUserPassword(event.target.value)} required={!editingUser} placeholder="Mínimo 12 caracteres"/><label>Rol</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim() || (!editingUser && newUserPassword.length<12)}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'} <Check/></button></form></div>}
       {materialModal && <div className="overlay" onClick={() => !busy && setMaterialModal(false)}><form className="dialog client-form" onSubmit={handleSaveMaterial} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setMaterialModal(false)}><X/></button><small>CATÁLOGO DE MATERIALES</small><h2>{editingMaterial ? 'Editar material' : 'Agregar material'}</h2><p>Registra el material y su precio de compra vigente. Los precios se podrán ajustar posteriormente.</p><label>Nombre *</label><input value={materialName} onChange={event => setMaterialName(event.target.value)} required maxLength={150} placeholder="Ej. PTR 2 x 2 cal. 14"/><div className="form-grid"><div><label>Categoría *</label><select value={materialCategory} onChange={event => setMaterialCategory(event.target.value)}><option>Estructura</option><option>Lámina</option><option>Rodillos</option><option>Rodamientos</option><option>Transmisión</option><option>Motorización</option><option>Eléctrico</option><option>Consumibles</option><option>Otros</option></select></div><div><label>Unidad *</label><select value={materialUnit} onChange={event => setMaterialUnit(event.target.value)}><option>pieza</option><option>metro</option><option>kg</option><option>m²</option><option>juego</option><option>litro</option><option>servicio</option></select></div></div><div className="form-grid"><div><label>Código / SKU</label><input value={materialSku} onChange={event => setMaterialSku(event.target.value)} maxLength={60}/></div><div><label>Proveedor</label><input value={materialSupplier} onChange={event => setMaterialSupplier(event.target.value)} maxLength={120}/></div></div><div className="form-grid"><div><label>Precio unitario *</label><input type="number" min="0" step="0.01" value={materialPrice} onChange={event => setMaterialPrice(event.target.value)} required/></div><div><label>Moneda</label><select value={materialCurrency} onChange={event => setMaterialCurrency(event.target.value as 'MXN' | 'USD')}><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div><label>Notas</label><textarea rows={2} value={materialNotes} onChange={event => setMaterialNotes(event.target.value)} maxLength={1000}/><button className="primary" disabled={busy || !materialName.trim()}>{busy ? 'Guardando…' : 'Guardar material'} <Check/></button></form></div>}
       {modal && <div className="overlay" onClick={() => !busy && setModal(false)}>
         <form className="dialog client-form" onSubmit={handleCreateClient} onClick={event => event.stopPropagation()}>

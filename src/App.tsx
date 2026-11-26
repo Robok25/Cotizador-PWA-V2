@@ -12,6 +12,7 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Role = 'vendedor' | 'administrador';
 type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion';
 type Profile = { role: Role; full_name: string | null };
+type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };
 type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
 type Client = {
   id: string;
@@ -55,6 +56,8 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [taxId, setTaxId] = useState('');
   const [notes, setNotes] = useState('');
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [materialModal, setMaterialModal] = useState(false);
@@ -150,6 +153,21 @@ export default function App() {
     return () => { active = false; };
   }, [session, profile, page]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadUsers() {
+      if (!supabase || !session || role !== 'administrador' || page !== 'usuarios') return;
+      setUsersLoading(true);
+      const { data, error: usersError } = await supabase.from('profiles').select('id, email, full_name, role, created_at').order('created_at', { ascending: false });
+      if (!active) return;
+      if (usersError) setError('No se pudieron cargar los usuarios: ' + usersError.message);
+      else setUsers((data || []) as UserRecord[]);
+      setUsersLoading(false);
+    }
+    void loadUsers();
+    return () => { active = false; };
+  }, [session, role, page]);
+
   const filteredMaterials = useMemo(() => {
     const term = materialSearch.trim().toLocaleLowerCase();
     return materials.filter(item => [item.name, item.category, item.sku, item.supplier].some(value => value?.toLocaleLowerCase().includes(term)));
@@ -194,6 +212,15 @@ export default function App() {
       if (data) setMaterials(data as Material[]);
       setMaterialModal(false);
     }
+    setBusy(false);
+  }
+
+  async function handleUserRoleChange(user: UserRecord, nextRole: Role) {
+    if (!supabase || role !== 'administrador' || user.id === session?.user.id || user.role === nextRole) return;
+    setBusy(true); setError('');
+    const { error: updateError } = await supabase.from('profiles').update({ role: nextRole }).eq('id', user.id);
+    if (updateError) setError('No se pudo actualizar el rol: ' + updateError.message);
+    else setUsers(current => current.map(item => item.id === user.id ? { ...item, role: nextRole } : item));
     setBusy(false);
   }
 
@@ -366,9 +393,17 @@ export default function App() {
               {materialsLoading ? <div className="table-empty">Cargando catálogo…</div> : filteredMaterials.length === 0 ? <div className="table-empty"><Boxes/><b>{materials.length ? 'No hay coincidencias' : 'Catálogo vacío'}</b><span>{materials.length ? 'Prueba con otro término.' : 'Agrega los materiales y componentes que utilizas en tus conveyors.'}</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Material</th><th>Categoría</th><th>Código</th><th>Unidad</th><th>Proveedor</th><th>Precio unitario</th><th>Estado</th>{page === 'materiales' && <th>Acciones</th>}</tr></thead><tbody>{filteredMaterials.map(item => <tr key={item.id}><td><b>{item.name}</b></td><td>{item.category}</td><td>{item.sku || '—'}</td><td>{item.unit}</td><td>{item.supplier || '—'}</td><td><b>{new Intl.NumberFormat('es-MX',{style:'currency',currency:item.currency}).format(item.unit_price)}</b></td><td><span className={item.active ? 'status-active' : 'status-inactive'}>{item.active ? 'Activo' : 'Inactivo'}</span></td>{page === 'materiales' && <td><button className="table-action" onClick={() => openMaterial(item)}>Editar</button><button className="table-action" onClick={() => toggleMaterial(item)} disabled={busy}>{item.active ? 'Desactivar' : 'Activar'}</button></td>}</tr>)}</tbody></table></div>}
             </section>
           </>}
-          {(['usuarios', 'configuracion'] as Page[]).includes(page) && <>
-            {heading('ADMINISTRACIÓN', page === 'usuarios' ? 'Gestiona los accesos y roles de los usuarios.' : page === 'materiales' ? 'Administra el catálogo de materiales disponibles.' : page === 'precios' ? 'Define y actualiza los precios de compra.' : 'Configura las preferencias generales de la plataforma.')}
-            <Empty icon={Cog} title="Módulo en preparación" desc="Esta sección se implementará después de validar el acceso, los roles y el directorio de clientes."/>
+          {page === 'usuarios' && role === 'administrador' && <>
+            {heading('ADMINISTRACIÓN', 'Consulta los usuarios registrados y asigna permisos de vendedor o administrador.')}
+            <section className="panel table">
+              <div className="search"><Users/><span className="search-label">Usuarios registrados</span><small>{users.length} usuarios</small></div>
+              {usersLoading ? <div className="table-empty">Cargando usuarios…</div> : users.length === 0 ? <div className="table-empty"><Users/><b>No hay usuarios registrados</b><span>Los usuarios creados en Supabase aparecerán aquí automáticamente.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Usuario</th><th>Correo electrónico</th><th>Rol</th><th>Registro</th></tr></thead><tbody>{users.map(user => <tr key={user.id}><td><b>{user.full_name || 'Sin nombre'}</b>{user.id === session.user.id && <small className="you-label">Tú</small>}</td><td>{user.email || '—'}</td><td>{user.id === session.user.id ? <span className="status-active">Administrador actual</span> : <select className="role-select" aria-label={'Rol de ' + (user.email || user.id)} value={user.role} disabled={busy} onChange={event => void handleUserRoleChange(user, event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select>}</td><td>{new Date(user.created_at).toLocaleDateString('es-MX')}</td></tr>)}</tbody></table></div>}
+              <p className="users-note">Para crear o invitar usuarios, utiliza Authentication → Users en Supabase. Por seguridad, la aplicación no almacena contraseñas ni utiliza claves administrativas en el navegador.</p>
+            </section>
+          </>}
+          {page === 'configuracion' && <>
+            {heading('ADMINISTRACIÓN', 'Preferencias y datos generales de la plataforma.')}
+            <Empty icon={Cog} title="Configuración general" desc="Las preferencias avanzadas se habilitarán en una siguiente etapa."/>
           </>}
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>

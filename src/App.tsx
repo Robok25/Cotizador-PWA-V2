@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, Archive, ArrowRight, Bell, Boxes, Building2, Calculator,
   Check, ChevronDown, CircleHelp, ClipboardList, Cog, Factory, FilePlus2,
@@ -223,7 +224,7 @@ export default function App() {
     </button>
   ));
 
-  const heading = (eyebrow: string, description: string, action?: React.ReactNode) => (
+  const heading = (eyebrow: string, description: string, action?: ReactNode) => (
     <div className="heading"><div><small>{eyebrow}</small><h1>{title}</h1><p>{description}</p></div>{action}</div>
   );
 

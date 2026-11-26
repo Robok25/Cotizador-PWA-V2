@@ -54,6 +54,7 @@ export default function App() {
   const [modal, setModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [userModal, setUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserRole, setNewUserRole] = useState<Role>('vendedor');
@@ -256,12 +257,30 @@ export default function App() {
     if (e) setError('No se pudo eliminar el material: ' + e.message); else setMaterials(items => items.filter(item => item.id !== material.id)); setBusy(false);
   }
 
+  function openUser(user?: UserRecord) {
+    setEditingUser(user || null); setNewUserEmail(user?.email || ''); setNewUserName(user?.full_name || ''); setNewUserRole(user?.role || 'vendedor'); setUserModal(true);
+  }
+
   async function handleInviteUser(event: FormEvent) {
     event.preventDefault(); if (!supabase || role !== 'administrador') return;
     setBusy(true); setError('');
-    const { data, error: e } = await supabase.functions.invoke('admin-users', { body: { action: 'invite', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } });
-    if (e || data?.error) setError('No se pudo invitar al usuario: ' + (data?.error || e?.message));
-    else { setUserModal(false); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setError('Invitación enviada. El usuario recibirá un correo para establecer su contraseña.'); }
+    const body = editingUser ? { action: 'update', user_id: editingUser.id, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : { action: 'invite', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole };
+    const { data, error: e } = await supabase.functions.invoke('admin-users', { body });
+    if (e || data?.error) setError('No se pudo guardar el usuario: ' + (data?.error || e?.message));
+    else {
+      if (editingUser) setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
+      setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor');
+      setError(editingUser ? 'Usuario actualizado.' : 'Invitación enviada. El usuario recibirá un correo para establecer su contraseña.');
+    }
+    setBusy(false);
+  }
+
+  async function handleDeleteUser(user: UserRecord) {
+    if (!supabase || user.id === session?.user.id || !window.confirm(`¿Eliminar el acceso de ${user.email || user.full_name}? Esta acción no se puede deshacer.`)) return;
+    setBusy(true); setError('');
+    const { data, error: e } = await supabase.functions.invoke('admin-users', { body: { action: 'delete', user_id: user.id } });
+    if (e || data?.error) setError('No se pudo eliminar el usuario: ' + (data?.error || e?.message));
+    else setUsers(items => items.filter(item => item.id !== user.id));
     setBusy(false);
   }
 
@@ -418,10 +437,10 @@ export default function App() {
             </section>
           </>}
           {page === 'usuarios' && role === 'administrador' && <>
-            {heading('ADMINISTRACIÓN', 'Invita usuarios y administra sus permisos desde ConveyorQuote.', <button className="primary" onClick={() => setUserModal(true)}><Plus/> Invitar usuario</button>)}
+            {heading('ADMINISTRACIÓN', 'Invita usuarios y administra sus permisos desde ConveyorQuote.', <button className="primary" onClick={() => openUser()}><Plus/> Invitar usuario</button>)}
             <section className="panel table">
               <div className="search"><Users/><span className="search-label">Usuarios registrados</span><small>{users.length} usuarios</small></div>
-              {usersLoading ? <div className="table-empty">Cargando usuarios…</div> : users.length === 0 ? <div className="table-empty"><Users/><b>No hay usuarios registrados</b><span>Los usuarios creados en Supabase aparecerán aquí automáticamente.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Usuario</th><th>Correo electrónico</th><th>Rol</th><th>Registro</th></tr></thead><tbody>{users.map(user => <tr key={user.id}><td><b>{user.full_name || 'Sin nombre'}</b>{user.id === session.user.id && <small className="you-label">Tú</small>}</td><td>{user.email || '—'}</td><td>{user.id === session.user.id ? <span className="status-active">Administrador actual</span> : <select className="role-select" aria-label={'Rol de ' + (user.email || user.id)} value={user.role} disabled={busy} onChange={event => void handleUserRoleChange(user, event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select>}</td><td>{new Date(user.created_at).toLocaleDateString('es-MX')}</td></tr>)}</tbody></table></div>}
+              {usersLoading ? <div className="table-empty">Cargando usuarios…</div> : users.length === 0 ? <div className="table-empty"><Users/><b>No hay usuarios registrados</b><span>Los usuarios creados en Supabase aparecerán aquí automáticamente.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Usuario</th><th>Correo electrónico</th><th>Rol</th><th>Registro</th><th>Acciones</th></tr></thead><tbody>{users.map(user => <tr key={user.id}><td><b>{user.full_name || 'Sin nombre'}</b>{user.id === session.user.id && <small className="you-label">Tú</small>}</td><td>{user.email || '—'}</td><td>{user.id === session.user.id ? <span className="status-active">Administrador actual</span> : <select className="role-select" aria-label={'Rol de ' + (user.email || user.id)} value={user.role} disabled={busy} onChange={event => void handleUserRoleChange(user, event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select>}</td><td>{new Date(user.created_at).toLocaleDateString('es-MX')}</td><td>{user.id !== session.user.id && <><button className="table-action" onClick={() => openUser(user)}>Editar</button><button className="table-action danger" onClick={() => void handleDeleteUser(user)} disabled={busy}>Eliminar</button></>}</td></tr>)}</tbody></table></div>}
               <p className="users-note">Las invitaciones se envían por correo. Cada usuario establece su propia contraseña desde el enlace recibido.</p>
             </section>
           </>}
@@ -432,7 +451,7 @@ export default function App() {
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>
       </main>
-      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setUserModal(false)}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>Invitar usuario</h2><p>Se enviará un enlace de invitación al correo indicado.</p><label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>Rol inicial</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim()}>{busy ? 'Enviando…' : 'Enviar invitación'} <Check/></button></form></div>}
+      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setUserModal(false)}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Invitar usuario'}</h2><p>{editingUser ? 'Actualiza sus datos y permisos.' : 'Se enviará un enlace de invitación al correo indicado.'}</p><label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>Rol inicial</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim()}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Enviar invitación'} <Check/></button></form></div>}
       {materialModal && <div className="overlay" onClick={() => !busy && setMaterialModal(false)}><form className="dialog client-form" onSubmit={handleSaveMaterial} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setMaterialModal(false)}><X/></button><small>CATÁLOGO DE MATERIALES</small><h2>{editingMaterial ? 'Editar material' : 'Agregar material'}</h2><p>Registra el material y su precio de compra vigente. Los precios se podrán ajustar posteriormente.</p><label>Nombre *</label><input value={materialName} onChange={event => setMaterialName(event.target.value)} required maxLength={150} placeholder="Ej. PTR 2 x 2 cal. 14"/><div className="form-grid"><div><label>Categoría *</label><select value={materialCategory} onChange={event => setMaterialCategory(event.target.value)}><option>Estructura</option><option>Lámina</option><option>Rodillos</option><option>Rodamientos</option><option>Transmisión</option><option>Motorización</option><option>Eléctrico</option><option>Consumibles</option><option>Otros</option></select></div><div><label>Unidad *</label><select value={materialUnit} onChange={event => setMaterialUnit(event.target.value)}><option>pieza</option><option>metro</option><option>kg</option><option>m²</option><option>juego</option><option>litro</option><option>servicio</option></select></div></div><div className="form-grid"><div><label>Código / SKU</label><input value={materialSku} onChange={event => setMaterialSku(event.target.value)} maxLength={60}/></div><div><label>Proveedor</label><input value={materialSupplier} onChange={event => setMaterialSupplier(event.target.value)} maxLength={120}/></div></div><div className="form-grid"><div><label>Precio unitario *</label><input type="number" min="0" step="0.01" value={materialPrice} onChange={event => setMaterialPrice(event.target.value)} required/></div><div><label>Moneda</label><select value={materialCurrency} onChange={event => setMaterialCurrency(event.target.value as 'MXN' | 'USD')}><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div><label>Notas</label><textarea rows={2} value={materialNotes} onChange={event => setMaterialNotes(event.target.value)} maxLength={1000}/><button className="primary" disabled={busy || !materialName.trim()}>{busy ? 'Guardando…' : 'Guardar material'} <Check/></button></form></div>}
       {modal && <div className="overlay" onClick={() => !busy && setModal(false)}>
         <form className="dialog client-form" onSubmit={handleCreateClient} onClick={event => event.stopPropagation()}>

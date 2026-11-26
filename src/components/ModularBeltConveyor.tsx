@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, ClipboardList, Layers3, LockKeyhole, Package, Ruler, Save, FolderOpen, Wrench, Info } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type Step = 'identificacion' | 'configuracion' | 'componentes' | 'revision';
 type ComponentCategory = 'laser_sheet' | 'profile' | 'nylamid' | 'commercial' | 'machined' | 'pending';
-type ComponentRule = { name: string; category: ComponentCategory; quantity: number; cadEnvelopeMm?: string; flatPatternRequired?: boolean };
+type ComponentRule = { name: string; category: ComponentCategory; quantity: number; description?: string; cadEnvelopeMm?: string; flatPatternRequired?: boolean };
 type ManufacturingConfig = {
   sheetWidthIn: string;
   sheetLengthIn: string;
@@ -14,6 +14,8 @@ type ManufacturingConfig = {
   laserKerfMm: string;
   profileKerfMm: string;
   profileEndTrimMm: string;
+  bomSource: 'step_export' | 'solidworks_csv';
+  bomSourceFile?: string;
   components: ComponentRule[];
 };
 type Project = { id: string; project_name: string; project_code: string | null; description: string | null; updated_at: string; configuration?: Record<string, unknown> | null };
@@ -29,6 +31,7 @@ const defaultConfig: ManufacturingConfig = {
   laserKerfMm: '',
   profileKerfMm: '',
   profileEndTrimMm: '',
+  bomSource: 'step_export',
   components: [
     { name: 'Bastidor', category: 'laser_sheet', quantity: 1, cadEnvelopeMm: '63.5 × 139.7 × 1900', flatPatternRequired: true },
     { name: 'Bastidor Simetria', category: 'laser_sheet', quantity: 1, cadEnvelopeMm: '63.5 × 139.7 × 1900', flatPatternRequired: true },
@@ -70,17 +73,97 @@ const categoryLabels: Record<ComponentCategory, string> = {
   pending: 'Por clasificar',
 };
 
+function normalizeBomText(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function parseDelimitedText(source: string): string[][] {
+  const text = source.replace(/^\uFEFF/, '');
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const delimiters = [',', ';', '\t'];
+  const delimiter = delimiters
+    .map(char => ({ char, count: firstLine.split(char).length - 1 }))
+    .sort((a, b) => b.count - a.count)[0].char;
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '"' && quoted && text[i + 1] === '"') { cell += '"'; i += 1; }
+    else if (char === '"') quoted = !quoted;
+    else if (char === delimiter && !quoted) { row.push(cell.trim()); cell = ''; }
+    else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(cell.trim());
+      if (row.some(value => value.length > 0)) rows.push(row);
+      row = []; cell = '';
+    } else cell += char;
+  }
+  row.push(cell.trim());
+  if (row.some(value => value.length > 0)) rows.push(row);
+  return rows;
+}
+
+function parseSolidWorksBomCsv(source: string, existing: ComponentRule[]): ComponentRule[] {
+  const rows = parseDelimitedText(source);
+  const headerIndex = rows.findIndex(row => {
+    const headers = row.map(normalizeBomText);
+    return headers.some(h => ['qty', 'quantity', 'cantidad', 'cant'].includes(h))
+      && headers.some(h => ['part number', 'part no', 'part name', 'component name', 'file name', 'filename', 'description', 'descripcion', 'name', 'nombre', 'numero de pieza'].includes(h));
+  });
+  if (headerIndex < 0) throw new Error('No encontré columnas de componente y cantidad. Exporta el BOM con columnas Part Number o Description y QTY.');
+  const headers = rows[headerIndex].map(normalizeBomText);
+  const quantityIndex = headers.findIndex(h => ['qty', 'quantity', 'cantidad', 'cant'].includes(h));
+  const partNumberIndex = headers.findIndex(h => ['part number', 'part no', 'numero de pieza'].includes(h));
+  const descriptionIndex = headers.findIndex(h => ['description', 'descripcion', 'part name', 'component name', 'file name', 'filename', 'name', 'nombre'].includes(h));
+  const nameIndex = partNumberIndex >= 0 ? partNumberIndex : descriptionIndex;
+  if (nameIndex < 0 || quantityIndex < 0) throw new Error('El BOM debe incluir el identificador de pieza y la cantidad.');
+  const normalize = (name: string) => normalizeBomText(name);
+  const grouped = new Map<string, ComponentRule>();
+  for (const row of rows.slice(headerIndex + 1)) {
+    const name = (row[nameIndex] || '').trim();
+    const description = descriptionIndex >= 0 && descriptionIndex !== nameIndex ? (row[descriptionIndex] || '').trim() : '';
+    const quantityText = (row[quantityIndex] || '').replace(/,/g, '.').trim();
+    const quantity = Number(quantityText);
+    if (!name || !Number.isFinite(quantity) || quantity <= 0) continue;
+    const key = normalize(name);
+    const prior = existing.find(item => normalize(item.name) === key || (!!description && normalize(item.name) === normalize(description)));
+    const current = grouped.get(key);
+    if (current) current.quantity += quantity;
+    else grouped.set(key, {
+      name,
+      description: description || undefined,
+      quantity,
+      category: prior?.category || 'pending',
+      cadEnvelopeMm: prior?.cadEnvelopeMm,
+      flatPatternRequired: prior?.flatPatternRequired,
+    });
+  }
+  const result = Array.from(grouped.values());
+  if (!result.length) throw new Error('No encontré renglones válidos con cantidad en el archivo.');
+  return result;
+}
+
 function readConfig(value: unknown): ManufacturingConfig {
   if (!value || typeof value !== 'object') return defaultConfig;
   const raw = value as Partial<ManufacturingConfig>;
   const saved = Array.isArray(raw.components) ? raw.components : [];
   const validCategory = (category: unknown): category is ComponentCategory =>
     typeof category === 'string' && ['laser_sheet','profile','nylamid','commercial','machined','pending'].includes(category);
-  const normalize = (name: string) => name.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
-  const components = defaultConfig.components.map(base => {
-    const prior = saved.find(item => item && typeof item.name === 'string' && normalize(item.name) === normalize(base.name));
-    return prior && validCategory(prior.category) ? { ...base, category: prior.category } : base;
-  });
+  const normalize = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const savedCategories = saved.filter((item): item is ComponentRule =>
+    !!item && typeof item.name === 'string' && item.name.length > 0 && validCategory(item.category)
+  );
+  const validSaved = savedCategories.filter(item =>
+    Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0
+  ).map(item => ({ ...item, quantity: Number(item.quantity) }));
+  const components = raw.bomSource === 'solidworks_csv' && validSaved.length
+    ? validSaved
+    : defaultConfig.components.map(base => {
+        const prior = savedCategories.find(item => normalize(item.name) === normalize(base.name));
+        return prior ? { ...base, category: prior.category } : base;
+      });
   return { ...defaultConfig, ...raw, components };
 }
 
@@ -125,6 +208,21 @@ export default function ModularBeltConveyor({ userId }: { userId: string }) {
  function updateComponent(index:number, category:ComponentCategory) {
   setConfig(current=>({...current,components:current.components.map((item,i)=>i===index?{...item,category}:item)}));
  }
+ async function importSolidWorksBom(event: ChangeEvent<HTMLInputElement>) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  setMessage('');
+  try {
+   const text = await file.text();
+   const components = parseSolidWorksBomCsv(text, config.components);
+   setConfig(current => ({ ...current, components, bomSource: 'solidworks_csv', bomSourceFile: file.name }));
+   setMessage(`BOM de SolidWorks importada: ${components.length} referencias y ${components.reduce((sum,item)=>sum+item.quantity,0)} piezas. Se reemplazó el conteo preliminar del STEP.`);
+  } catch (error) {
+   setMessage('No se pudo importar el BOM: ' + (error instanceof Error ? error.message : 'formato no reconocido.'));
+  } finally {
+   event.target.value = '';
+  }
+ }
  function updateSetting(key:Exclude<keyof ManufacturingConfig,'components'>, value:string) {
   setConfig(current=>({...current,[key]:value}));
  }
@@ -143,7 +241,7 @@ export default function ModularBeltConveyor({ userId }: { userId: string }) {
     <div className="manufacturing-setting"><b>Perfiles comerciales</b><label>Longitud del tramo (mm)<input type="number" min="0" step="1" value={config.profileLengthMm} onChange={e=>updateSetting('profileLengthMm',e.target.value)}/></label></div>
     <div className="manufacturing-setting"><b>Parámetros de proceso por definir</b><label>Separación entre piezas láser (mm)<input type="number" min="0" step="0.1" placeholder="Pendiente" value={config.laserGapMm} onChange={e=>updateSetting('laserGapMm',e.target.value)}/></label><label>Margen de borde de lámina (mm)<input type="number" min="0" step="0.1" placeholder="Pendiente" value={config.sheetEdgeMarginMm} onChange={e=>updateSetting('sheetEdgeMarginMm',e.target.value)}/></label><label>Kerf láser (mm)<input type="number" min="0" step="0.1" placeholder="Pendiente" value={config.laserKerfMm} onChange={e=>updateSetting('laserKerfMm',e.target.value)}/></label><label>Kerf de sierra (mm)<input type="number" min="0" step="0.1" placeholder="Pendiente" value={config.profileKerfMm} onChange={e=>updateSetting('profileKerfMm',e.target.value)}/></label><label>Recorte de extremos de perfil (mm)<input type="number" min="0" step="0.1" placeholder="Pendiente" value={config.profileEndTrimMm} onChange={e=>updateSetting('profileEndTrimMm',e.target.value)}/></label></div>
    </div><div className="builder-hint"><Info/><span>Las láminas se anidan por material y espesor. Los perfiles se optimizan por material y sección. Los parámetros de corte que aún no has definido se mantienen vacíos; no se usan valores supuestos.</span></div></>}
-   {step==='componentes'&&<><div className="builder-section-title"><Package/><div><h3>Despiece extraído del ensamble</h3><p>{config.components.reduce((sum,item)=>sum+item.quantity,0)} ocurrencias · {config.components.length} referencias únicas según el STEP exportado. Confirma o modifica la clasificación de fabricación.</p></div></div><div className="component-rules"><div className="component-rule-header component-rule-bom-header"><span>Componente</span><span>Cantidad</span><span>Tratamiento</span></div>{config.components.map((item,i)=><div className="component-rule component-bom-row" key={item.name}><span className="component-bom-name"><b>{item.name}</b>{item.cadEnvelopeMm&&<small>Envolvente 3D CAD: {item.cadEnvelopeMm} mm</small>}{item.flatPatternRequired&&<small className="flat-pattern-flag">Requiere desarrollo plano</small>}</span><strong className="component-quantity">{item.quantity}</strong><select value={item.category} onChange={e=>updateComponent(i,e.target.value as ComponentCategory)}>{Object.entries(categoryLabels).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></div>)}</div><div className="builder-hint"><Info/><span>Las envolventes 3D son referencias geométricas del STEP, no dimensiones de fabricación ni desarrollos planos. Las sufrideras son Nylamid. Base soporte y Pierna soporte requieren desarrollo de chapa. Los componentes comerciales se cotizarán con precio unitario directo.</span></div><div className="builder-hint"><LockKeyhole/><span>El conteo procede de las ocurrencias visibles en el STEP. Para garantizar que todos los componentes suprimidos queden excluidos, falta contrastarlo con la lista de materiales del ensamble nativo de SolidWorks; el STEP no conserva por sí mismo el estado de supresión.</span></div></>}
+   {step==='componentes'&&<><div className="builder-section-title"><Package/><div><h3>Despiece del ensamble</h3><p>{config.components.reduce((sum,item)=>sum+item.quantity,0)} piezas · {config.components.length} referencias únicas · Fuente: {config.bomSource==='solidworks_csv'?'BOM nativo de SolidWorks':'STEP exportado'}.</p></div></div><div className="bom-import-panel"><label>Importar lista de materiales de SolidWorks (CSV)<input type="file" accept=".csv,text/csv,.txt,text/plain" onChange={e=>void importSolidWorksBom(e)}/></label><small>Usa una BOM de tipo “Solo piezas” de la configuración activa, con columnas Part Number o Description y QTY. Al importarla reemplazará el conteo preliminar del STEP.</small>{config.bomSourceFile&&<small>Archivo importado: {config.bomSourceFile}</small>}</div><div className="component-rules"><div className="component-rule-header component-rule-bom-header"><span>Componente</span><span>Cantidad</span><span>Tratamiento</span></div>{config.components.map((item,i)=><div className="component-rule component-bom-row" key={item.name}><span className="component-bom-name"><b>{item.name}</b>{item.description&&<small>{item.description}</small>}{item.cadEnvelopeMm&&config.bomSource==='step_export'&&<small>Envolvente 3D CAD: {item.cadEnvelopeMm} mm</small>}{item.flatPatternRequired&&<small className="flat-pattern-flag">Requiere desarrollo plano</small>}</span><strong className="component-quantity">{item.quantity}</strong><select value={item.category} onChange={e=>updateComponent(i,e.target.value as ComponentCategory)}>{Object.entries(categoryLabels).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></div>)}</div><div className="builder-hint"><Info/><span>Las envolventes 3D son referencias geométricas del STEP, no dimensiones de fabricación ni desarrollos planos. Las sufrideras son Nylamid. Base soporte y Pierna soporte requieren desarrollo de chapa. Los componentes comerciales se cotizarán con precio unitario directo.</span></div><div className="builder-hint"><LockKeyhole/><span>{config.bomSource==='solidworks_csv'?'El conteo proviene de la BOM nativa importada. Genera el BOM en la configuración correcta y como Solo piezas para excluir los componentes suprimidos.':'El conteo procede de las ocurrencias visibles en el STEP. Para garantizar que los componentes suprimidos queden excluidos, importa la BOM nativa de SolidWorks; el STEP no conserva por sí mismo el estado de supresión.'}</span></div></>}
    {step==='revision'&&<><div className="builder-section-title"><CheckCircle2/><div><h3>Revisión del proyecto</h3><p>Resumen de identificación y reglas de fabricación.</p></div></div><div className="review-list"><span>Equipo<b>Conveyor de Banda Modular</b></span><span>Proyecto<b>{name||'Sin nombre asignado'}</b></span><span>Clave<b>{code||'Sin clave'}</b></span><span>Descripción<b>{description||'Sin descripción'}</b></span><span>Lámina<b>{config.sheetWidthIn} × {config.sheetLengthIn} pulgadas</b></span><span>Tramo de perfil<b>{config.profileLengthMm} mm</b></span><span>Ocurrencias en despiece<b>{config.components.reduce((sum,item)=>sum+item.quantity,0)}</b></span><span>Ocurrencias chapa láser<b>{config.components.filter(x=>x.category==='laser_sheet').reduce((sum,item)=>sum+item.quantity,0)}</b></span><span>Ocurrencias Nylamid<b>{config.components.filter(x=>x.category==='nylamid').reduce((sum,item)=>sum+item.quantity,0)}</b></span><span>Ocurrencias comerciales<b>{config.components.filter(x=>x.category==='commercial').reduce((sum,item)=>sum+item.quantity,0)}</b></span><span>Ocurrencias por clasificar<b>{config.components.filter(x=>x.category==='pending').reduce((sum,item)=>sum+item.quantity,0)}</b></span><span>Estado<b>{projectId?'Borrador guardado':'Sin guardar'}</b></span></div><div className="builder-hint"><LockKeyhole/><span>Esta etapa registra reglas y clasificación preliminar; no presenta cantidades, desarrollos ni costos hasta validar la información geométrica y comercial.</span></div></>}
    {message&&<div className={message.startsWith('No se pudo')?'error-message':'builder-hint'}>{message}</div>}
    <div className="builder-actions"><button type="button" className="secondary-action" disabled={index===0} onClick={()=>setStep(steps[Math.max(0,index-1)].id)}><ArrowLeft size={16}/> Anterior</button><div className="builder-action-right"><button type="button" className="secondary-action" onClick={()=>void saveProject()} disabled={saving||!name.trim()}><Save size={15}/>{saving?'Guardando…':'Guardar borrador'}</button>{index<steps.length-1&&<button type="button" className="primary" onClick={()=>setStep(steps[index+1].id)}>Continuar <ArrowRight size={16}/></button>}</div></div>

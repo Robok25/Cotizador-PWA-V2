@@ -43,3 +43,10 @@
 .component-bom-name .flat-pattern-flag{color:#b85e2a;font-weight:800}
 .component-quantity{font-variant-numeric:tabular-nums;text-align:center;color:#29444d;font-size:12px}
 @media(max-width:760px){.component-bom-header,.component-bom-row{grid-template-columns:minmax(145px,1.2fr) 48px minmax(175px,1.3fr);gap:7px;padding:9px}.component-bom-name small{font-size:8px}}
+
+
+/* Importación de BOM nativa de SolidWorks */
+.bom-import-panel{display:grid;gap:7px;margin:0 0 14px;padding:13px;border:1px dashed #c8d5d9;border-radius:8px;background:#fafcfc}
+.bom-import-panel label{display:grid;gap:7px;color:#38545d;font-size:10px;font-weight:800}
+.bom-import-panel input[type=file]{width:100%;max-width:100%;padding:8px;border:1px solid #dce5e8;border-radius:6px;background:white;color:#526970;font:10px 'DM Sans',sans-serif}
+.bom-import-panel small{font-size:9px;line-height:1.5;color:#7c8d93}

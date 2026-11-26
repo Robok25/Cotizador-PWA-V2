@@ -440,7 +440,7 @@ export default function App() {
                     detail += ` (HTTP ${requestError.context.status})`;
                   }
                   setError(detail);
-                } else { setError('Solicitud registrada. El administrador recibirá una notificación dentro de ConveyorQuote y podrá revisar tu acceso desde Administración → Usuarios.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
+                } else { setError('SOLICITUD ENVIADA. El administrador podrá revisar tu acceso.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
                 setBusy(false);
               }}>
                 <label>Nombre completo *</label><input value={requestName} onChange={e=>setRequestName(e.target.value)} required maxLength={120}/>

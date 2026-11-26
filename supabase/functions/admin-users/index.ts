@@ -38,7 +38,7 @@ Deno.serve(async (req: Request) => {
     const fullName = body.full_name?.trim();
     const password = body.password || "";
     const role = body.role === "administrador" ? "administrador" : "vendedor";
-    if (!email || !fullName || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return json({ error: "Indica nombre y correo válidos." }, 400);
+    if (!email || !fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "Indica nombre y correo válidos." }, 400);
     if (password.length < 12) return json({ error: "La contraseña inicial debe tener al menos 12 caracteres." }, 400);
     const { data, error } = await adminClient.auth.admin.createUser({
       email, password, email_confirm: true, user_metadata: { full_name: fullName },

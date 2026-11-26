@@ -8,6 +8,7 @@ const cors = {
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 Deno.serve(async req => {
+  try {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return reply({ error: "Método no permitido." }, 405);
   const url = Deno.env.get("SUPABASE_URL");
@@ -27,7 +28,16 @@ Deno.serve(async req => {
   const { data, error } = await db.from("registration_requests").insert({
     full_name: fullName, email, company: company || null, reason: reason || null,
   }).select("id").single();
-  if (error) return reply({ error: "No se pudo registrar la solicitud." }, 500);
+  if (error) {
+    console.error("registration-requests database insert failed:", { code: error.code, message: error.message, details: error.details, hint: error.hint });
+    if (error.code === "42P01" || error.code === "PGRST205") return reply({ error: "La tabla de solicitudes no está disponible. Verifica que la migración de solicitudes de acceso esté aplicada en Supabase." }, 500);
+    if (error.code === "42501") return reply({ error: "Supabase rechazó el registro por permisos. Es necesario revisar la configuración de la función." }, 500);
+    return reply({ error: "No se pudo guardar la solicitud en la base de datos. Código: " + (error.code || "desconocido") }, 500);
+  }
 
   return reply({ success: true, message: "Solicitud registrada. El administrador podrá revisarla desde ConveyorQuote.", request_id: data.id });
+  } catch (cause) {
+    console.error("registration-requests unexpected error:", cause);
+    return reply({ error: "Ocurrió un error interno al registrar la solicitud. Intenta nuevamente más tarde." }, 500);
+  }
 });

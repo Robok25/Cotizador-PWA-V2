@@ -230,8 +230,8 @@ export default function App() {
   async function handleUserRoleChange(user: UserRecord, nextRole: Role) {
     if (!supabase || role !== 'administrador' || user.id === session?.user.id || user.role === nextRole) return;
     setBusy(true); setError('');
-    const { error: updateError } = await supabase.from('profiles').update({ role: nextRole }).eq('id', user.id);
-    if (updateError) setError('No se pudo actualizar el rol: ' + updateError.message);
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-users', { body: { action: 'update', user_id: user.id, email: user.email || '', full_name: user.full_name || '', role: nextRole } });
+    if (invokeError || data?.error) setError('No se pudo actualizar el rol: ' + (data?.error || invokeError?.message));
     else setUsers(current => current.map(item => item.id === user.id ? { ...item, role: nextRole } : item));
     setBusy(false);
   }

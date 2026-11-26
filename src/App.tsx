@@ -11,8 +11,8 @@ import ModularBeltConveyor from './components/ModularBeltConveyor';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type Role = 'vendedor' | 'administrador';
-type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion' | 'banda-modular';
-type Profile = { role: Role; full_name: string | null };
+type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion' | 'banda-modular' | 'perfil';
+type Profile = { role: Role; full_name: string | null; phone?: string | null };
 type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };
 type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
 type Client = {
@@ -45,7 +45,7 @@ export default function App() {
   const [page, setPage] = useState<Page>('inicio');
   const [mobile, setMobile] = useState(false);
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState('');\n  const [requestMode, setRequestMode] = useState(false);\n  const [requestName, setRequestName] = useState('');\n  const [requestEmail, setRequestEmail] = useState('');\n  const [requestCompany, setRequestCompany] = useState('');\n  const [requestReason, setRequestReason] = useState('');\n  const [requestWebsite, setRequestWebsite] = useState('');\n  const [profileName, setProfileName] = useState('');\n  const [profilePhone, setProfilePhone] = useState('');\n  const [profilePassword, setProfilePassword] = useState('');\n  const [profilePasswordConfirm, setProfilePasswordConfirm] = useState('');\n  const [newUserPassword, setNewUserPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
@@ -81,7 +81,7 @@ export default function App() {
   const [materialSearch, setMaterialSearch] = useState('');
 
   const role = profile?.role;
-  const title = [...base, ...(role === 'administrador' ? admin : [])].find(item => item[0] === page)?.[1] || 'Inicio';
+  const title = page === 'perfil' ? 'Mi perfil' : [...base, ...(role === 'administrador' ? admin : [])].find(item => item[0] === page)?.[1] || 'Inicio';
 
   useEffect(() => {
     if (!supabase) {
@@ -111,7 +111,7 @@ export default function App() {
       setProfileLoading(true);
       const { data, error: profileError } = await supabase
         .from('profiles')
-        .select('role, full_name')
+        .select('role, full_name, phone')
         .eq('id', session.user.id)
         .single();
       if (!active) return;
@@ -264,13 +264,13 @@ export default function App() {
   async function handleInviteUser(event: FormEvent) {
     event.preventDefault(); if (!supabase || role !== 'administrador') return;
     setBusy(true); setError('');
-    const body = editingUser ? { action: 'update', user_id: editingUser.id, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : { action: 'invite', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole };
+    const body = editingUser ? { action: 'update', user_id: editingUser.id, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole, password: newUserPassword || undefined } : { action: 'create', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole, password: newUserPassword };
     const { data, error: e } = await supabase.functions.invoke('admin-users', { body });
     if (e || data?.error) setError('No se pudo guardar el usuario: ' + (data?.error || e?.message));
     else {
       if (editingUser) setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
-      setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor');
-      setError(editingUser ? 'Usuario actualizado.' : 'Invitación enviada. El usuario recibirá un correo para establecer su contraseña.');
+      setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
+      setError(editingUser ? 'Usuario actualizado.' : 'Cuenta creada. Entrega al usuario su correo y contraseña inicial por un canal seguro.');
     }
     setBusy(false);
   }
@@ -347,16 +347,38 @@ export default function App() {
           <form onSubmit={handleLogin}>
             <div className="mobile-logo"><Truck/><b>CONVEYOR<span>QUOTE</span></b></div>
             <small>ACCESO A LA PLATAFORMA</small>
-            <h2>Iniciar sesión</h2>
-            <p>Ingresa con el usuario que creaste en Supabase.</p>
-            <label>Correo electrónico</label>
-            <div className="field"><UserRound/><input type="email" autoComplete="username" placeholder="nombre@empresa.com" value={email} onChange={event => setEmail(event.target.value)} required/></div>
-            <label>Contraseña</label>
-            <div className="field"><ShieldCheck/><input type="password" autoComplete="current-password" placeholder="Ingresa tu contraseña" value={password} onChange={event => setPassword(event.target.value)} required/></div>
-            <button className="primary" disabled={!isSupabaseConfigured || busy}>{busy ? 'Conectando…' : 'Entrar'} <ArrowRight/></button>
-            {!isSupabaseConfigured && <div className="setup-message">Falta configurar .env.local con la URL y la clave pública de tu proyecto Supabase.</div>}
+            {requestMode ? <>
+              <h2>Solicitar acceso</h2>
+              <p>El administrador revisará tus datos y se pondrá en contacto contigo.</p>
+              <form className="access-request-form" onSubmit={async event => {
+                event.preventDefault(); if (!supabase) return;
+                setBusy(true); setError('');
+                const { data, error: requestError } = await supabase.functions.invoke('registration-requests', { body: { full_name: requestName, email: requestEmail, company: requestCompany, reason: requestReason, website: requestWebsite } });
+                if (requestError || data?.error) setError(data?.error || requestError?.message || 'No se pudo enviar la solicitud.');
+                else { setError(data?.email_sent === false ? 'Tu solicitud quedó registrada. El aviso por correo está pendiente de configuración; el administrador podrá revisarla en la plataforma.' : 'Solicitud enviada. El administrador recibió tus datos para revisar el acceso.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
+                setBusy(false);
+              }}>
+                <label>Nombre completo *</label><input value={requestName} onChange={e=>setRequestName(e.target.value)} required maxLength={120}/>
+                <label>Correo electrónico *</label><input type="email" value={requestEmail} onChange={e=>setRequestEmail(e.target.value)} required maxLength={254}/>
+                <label>Empresa</label><input value={requestCompany} onChange={e=>setRequestCompany(e.target.value)} maxLength={150}/>
+                <label>Motivo de la solicitud</label><textarea rows={3} value={requestReason} onChange={e=>setRequestReason(e.target.value)} maxLength={1000}/>
+                <input className="hp-field" tabIndex={-1} autoComplete="off" aria-hidden="true" value={requestWebsite} onChange={e=>setRequestWebsite(e.target.value)}/>
+                <button className="primary" disabled={busy}>{busy?'Enviando…':'Enviar solicitud'} <ArrowRight/></button>
+              </form>
+              <button type="button" className="login-link" onClick={()=>{setRequestMode(false);setError('');}}>Volver a iniciar sesión</button>
+            </> : <>
+              <h2>Iniciar sesión</h2>
+              <p>Ingresa con las credenciales que te proporcionó el administrador.</p>
+              <label>Correo electrónico</label>
+              <div className="field"><UserRound/><input type="email" autoComplete="username" placeholder="nombre@empresa.com" value={email} onChange={event => setEmail(event.target.value)} required/></div>
+              <label>Contraseña</label>
+              <div className="field"><ShieldCheck/><input type="password" autoComplete="current-password" placeholder="Ingresa tu contraseña" value={password} onChange={event => setPassword(event.target.value)} required/></div>
+              <button className="primary" disabled={!isSupabaseConfigured || busy}>{busy ? 'Conectando…' : 'Entrar'} <ArrowRight/></button>
+              <button type="button" className="login-link" onClick={()=>{setRequestMode(true);setError('');}}>Solicitar acceso</button>
+            </>}
+            {!isSupabaseConfigured && <div className="setup-message">Falta configurar la conexión con Supabase.</div>}
             {error && <div className="error-message">{error}</div>}
-            <div className="demo">● Conexión segura · autenticación Supabase</div>
+            <div className="demo">● Acceso controlado · autenticación segura</div>
           </form>
           <footer>© 2026 ConveyorQuote · Plataforma de cotización</footer>
         </section>
@@ -387,7 +409,7 @@ export default function App() {
           <div className="help"><CircleHelp/> ¿Necesitas ayuda?</div>
           <div className="profile">
             <span>{role === 'administrador' ? 'AD' : 'VE'}</span>
-            <b>{profile.full_name || session.user.email}<small>{role === 'administrador' ? 'Administrador' : 'Vendedor'}</small></b>
+            <button type="button" className="profile-open" onClick={()=>{setProfileName(profile.full_name || '');setProfilePhone(profile.phone || '');setProfilePassword('');setProfilePasswordConfirm('');setPage('perfil');setMobile(false);}}><b>{profile.full_name || session.user.email}<small>{role === 'administrador' ? 'Administrador · Mi perfil' : 'Vendedor · Mi perfil'}</small></b></button>
             <button aria-label="Cerrar sesión" onClick={handleLogout} disabled={busy}><LogOut/></button>
           </div>
         </div>
@@ -437,11 +459,35 @@ export default function App() {
             </section>
           </>}
           {page === 'usuarios' && role === 'administrador' && <>
-            {heading('ADMINISTRACIÓN', 'Invita usuarios y administra sus permisos desde ConveyorQuote.', <button className="primary" onClick={() => openUser()}><Plus/> Invitar usuario</button>)}
+            {heading('ADMINISTRACIÓN', 'Crea cuentas y administra sus permisos desde ConveyorQuote.', <button className="primary" onClick={() => openUser()}><Plus/> Crear usuario</button>)}
             <section className="panel table">
               <div className="search"><Users/><span className="search-label">Usuarios registrados</span><small>{users.length} usuarios</small></div>
               {usersLoading ? <div className="table-empty">Cargando usuarios…</div> : users.length === 0 ? <div className="table-empty"><Users/><b>No hay usuarios registrados</b><span>Los usuarios creados en Supabase aparecerán aquí automáticamente.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Usuario</th><th>Correo electrónico</th><th>Rol</th><th>Registro</th><th>Acciones</th></tr></thead><tbody>{users.map(user => <tr key={user.id}><td><b>{user.full_name || 'Sin nombre'}</b>{user.id === session.user.id && <small className="you-label">Tú</small>}</td><td>{user.email || '—'}</td><td>{user.id === session.user.id ? <span className="status-active">Administrador actual</span> : <select className="role-select" aria-label={'Rol de ' + (user.email || user.id)} value={user.role} disabled={busy} onChange={event => void handleUserRoleChange(user, event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select>}</td><td>{new Date(user.created_at).toLocaleDateString('es-MX')}</td><td>{user.id !== session.user.id && <><button className="table-action" onClick={() => openUser(user)}>Editar</button><button className="table-action danger" onClick={() => void handleDeleteUser(user)} disabled={busy}>Eliminar</button></>}</td></tr>)}</tbody></table></div>}
-              <p className="users-note">Las invitaciones se envían por correo. Cada usuario establece su propia contraseña desde el enlace recibido.</p>
+              <p className="users-note">Solo los administradores crean, modifican o eliminan cuentas. La contraseña inicial la establece el administrador y debe entregarse al usuario por un canal seguro.</p>
+            </section>
+          </>}
+          {page === 'perfil' && <>
+            {heading('CUENTA', 'Administra tus datos personales y la contraseña de acceso.')}
+            <section className="panel profile-settings">
+              <form className="client-form" onSubmit={async event=>{
+                event.preventDefault(); if(!supabase || !session?.user) return;
+                if(profilePassword && profilePassword.length<12){setError('La nueva contraseña debe tener al menos 12 caracteres.');return;}
+                if(profilePassword && profilePassword!==profilePasswordConfirm){setError('Las contraseñas no coinciden.');return;}
+                setBusy(true);setError('');
+                const {error: profileError}=await supabase.from('profiles').update({full_name:profileName.trim(),phone:profilePhone.trim()||null}).eq('id',session.user.id);
+                if(profileError){setError('No se pudieron guardar tus datos: '+profileError.message);setBusy(false);return;}
+                if(profilePassword){const {error: passwordError}=await supabase.auth.updateUser({password:profilePassword});if(passwordError){setError('Tus datos se guardaron, pero no se pudo cambiar la contraseña: '+passwordError.message);setBusy(false);return;}}
+                setProfile({...profile,full_name:profileName.trim(),phone:profilePhone.trim()||null});setProfilePassword('');setProfilePasswordConfirm('');setError('Perfil actualizado correctamente.');setBusy(false);
+              }}>
+                <label>Nombre completo *</label><input value={profileName} onChange={e=>setProfileName(e.target.value)} required maxLength={120}/>
+                <label>Correo de acceso</label><input value={session.user.email||''} disabled/>
+                <label>Teléfono</label><input value={profilePhone} onChange={e=>setProfilePhone(e.target.value)} maxLength={40} placeholder="Teléfono de contacto"/>
+                <div className="profile-divider"/>
+                <h3>Cambiar contraseña</h3><p>Deja estos campos vacíos si no deseas cambiarla. Usa al menos 12 caracteres.</p>
+                <label>Nueva contraseña</label><input type="password" autoComplete="new-password" minLength={12} value={profilePassword} onChange={e=>setProfilePassword(e.target.value)}/>
+                <label>Confirmar nueva contraseña</label><input type="password" autoComplete="new-password" minLength={12} value={profilePasswordConfirm} onChange={e=>setProfilePasswordConfirm(e.target.value)}/>
+                <button className="primary" disabled={busy||!profileName.trim()}>{busy?'Guardando…':'Guardar mi perfil'} <Check/></button>
+              </form>
             </section>
           </>}
           {page === 'configuracion' && <>
@@ -451,7 +497,7 @@ export default function App() {
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>
       </main>
-      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setUserModal(false)}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Invitar usuario'}</h2><p>{editingUser ? 'Actualiza sus datos y permisos.' : 'Se enviará un enlace de invitación al correo indicado.'}</p><label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>Rol inicial</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim()}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Enviar invitación'} <Check/></button></form></div>}
+      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setUserModal(false)}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p>{editingUser ? 'Actualiza sus datos, permisos y, si es necesario, restablece su contraseña.' : 'Define las credenciales iniciales. La contraseña debe tener al menos 12 caracteres.'}</p><label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial *'}</label><input type="password" autoComplete="new-password" minLength={12} value={newUserPassword} onChange={event => setNewUserPassword(event.target.value)} required={!editingUser} placeholder="Mínimo 12 caracteres"/><label>Rol</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim() || (!editingUser && newUserPassword.length<12)}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'} <Check/></button></form></div>}
       {materialModal && <div className="overlay" onClick={() => !busy && setMaterialModal(false)}><form className="dialog client-form" onSubmit={handleSaveMaterial} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setMaterialModal(false)}><X/></button><small>CATÁLOGO DE MATERIALES</small><h2>{editingMaterial ? 'Editar material' : 'Agregar material'}</h2><p>Registra el material y su precio de compra vigente. Los precios se podrán ajustar posteriormente.</p><label>Nombre *</label><input value={materialName} onChange={event => setMaterialName(event.target.value)} required maxLength={150} placeholder="Ej. PTR 2 x 2 cal. 14"/><div className="form-grid"><div><label>Categoría *</label><select value={materialCategory} onChange={event => setMaterialCategory(event.target.value)}><option>Estructura</option><option>Lámina</option><option>Rodillos</option><option>Rodamientos</option><option>Transmisión</option><option>Motorización</option><option>Eléctrico</option><option>Consumibles</option><option>Otros</option></select></div><div><label>Unidad *</label><select value={materialUnit} onChange={event => setMaterialUnit(event.target.value)}><option>pieza</option><option>metro</option><option>kg</option><option>m²</option><option>juego</option><option>litro</option><option>servicio</option></select></div></div><div className="form-grid"><div><label>Código / SKU</label><input value={materialSku} onChange={event => setMaterialSku(event.target.value)} maxLength={60}/></div><div><label>Proveedor</label><input value={materialSupplier} onChange={event => setMaterialSupplier(event.target.value)} maxLength={120}/></div></div><div className="form-grid"><div><label>Precio unitario *</label><input type="number" min="0" step="0.01" value={materialPrice} onChange={event => setMaterialPrice(event.target.value)} required/></div><div><label>Moneda</label><select value={materialCurrency} onChange={event => setMaterialCurrency(event.target.value as 'MXN' | 'USD')}><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div><label>Notas</label><textarea rows={2} value={materialNotes} onChange={event => setMaterialNotes(event.target.value)} maxLength={1000}/><button className="primary" disabled={busy || !materialName.trim()}>{busy ? 'Guardando…' : 'Guardar material'} <Check/></button></form></div>}
       {modal && <div className="overlay" onClick={() => !busy && setModal(false)}>
         <form className="dialog client-form" onSubmit={handleCreateClient} onClick={event => event.stopPropagation()}>

@@ -13,7 +13,8 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Role = 'vendedor' | 'administrador';
 type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion' | 'banda-modular' | 'perfil';
 type Profile = { role: Role; full_name: string | null; phone?: string | null };
-type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };\ntype RegistrationRequest = { id: string; full_name: string; email: string; company: string | null; reason: string | null; status: 'pending' | 'approved' | 'rejected'; created_at: string };
+type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };
+type RegistrationRequest = { id: string; full_name: string; email: string; company: string | null; reason: string | null; status: 'pending' | 'approved' | 'rejected'; created_at: string };
 type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
 type Client = {
   id: string;
@@ -75,7 +76,9 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [taxId, setTaxId] = useState('');
   const [notes, setNotes] = useState('');
-  const [users, setUsers] = useState<UserRecord[]>([]);\n  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);\n  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [usersLoading, setUsersLoading] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
@@ -285,7 +288,8 @@ export default function App() {
     if (e || data?.error) setError('No se pudo guardar el usuario: ' + (data?.error || e?.message));
     else {
       if (editingUser) setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
-      if (!editingUser && selectedRequestId) { await supabase.from('registration_requests').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', selectedRequestId); setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item)); }\n      setSelectedRequestId(null); setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
+      if (!editingUser && selectedRequestId) { await supabase.from('registration_requests').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', selectedRequestId); setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item)); }
+      setSelectedRequestId(null); setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
       setError(editingUser ? 'Usuario actualizado.' : 'Cuenta creada. Entrega al usuario su correo y contraseña inicial por un canal seguro.');
     }
     setBusy(false);

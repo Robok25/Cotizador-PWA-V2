@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "supabase/functions/admin-users/**"
+      - "supabase/functions/registration-requests/**"
       - ".github/workflows/deploy-supabase-function.yml"
   workflow_dispatch:
 
@@ -30,3 +31,4 @@ jobs:
           fi
           supabase link --project-ref bvrehgyjxbwlrcbdxdos
           supabase functions deploy admin-users --project-ref bvrehgyjxbwlrcbdxdos --yes
+          supabase functions deploy registration-requests --project-ref bvrehgyjxbwlrcbdxdos --no-verify-jwt --yes

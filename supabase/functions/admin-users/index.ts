@@ -49,7 +49,12 @@ Deno.serve(async (req: Request) => {
     const email = body.email?.trim().toLowerCase();
     const fullName = body.full_name?.trim();
     const role = body.role === "administrador" ? "administrador" : "vendedor";
-    if (!targetId || !email || !fullName || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return json({ error: "Indica nombre y correo válidos." }, 400);
+    if (!targetId || !email || !fullName || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ error: "Indica nombre y correo válidos." }, 400);
+    const { data: targetProfile } = await adminClient.from("profiles").select("role").eq("id", targetId).maybeSingle();
+    if (targetProfile?.role === "administrador" && role !== "administrador") {
+      const { count } = await adminClient.from("profiles").select("id", { count: "exact", head: true }).eq("role", "administrador");
+      if ((count || 0) <= 1) return json({ error: "No puedes quitar el rol al último administrador." }, 400);
+    }
     const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(targetId, { email, user_metadata: { full_name: fullName } });
     if (authUpdateError) return json({ error: authUpdateError.message }, 400);
     const { error: profileUpdateError } = await adminClient.from("profiles").update({ email, full_name: fullName, role }).eq("id", targetId);

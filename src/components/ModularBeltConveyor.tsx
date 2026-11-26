@@ -152,10 +152,16 @@ function readConfig(value: unknown): ManufacturingConfig {
   const validCategory = (category: unknown): category is ComponentCategory =>
     typeof category === 'string' && ['laser_sheet','profile','nylamid','commercial','machined','pending'].includes(category);
   const normalize = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const components = defaultConfig.components.map(base => {
-    const prior = saved.find(item => item && typeof item.name === 'string' && normalize(item.name) === normalize(base.name));
-    return prior && validCategory(prior.category) ? { ...base, category: prior.category } : base;
-  });
+  const validSaved = saved.filter((item): item is ComponentRule =>
+    !!item && typeof item.name === 'string' && item.name.length > 0 && validCategory(item.category)
+    && Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0
+  ).map(item => ({ ...item, quantity: Number(item.quantity) }));
+  const components = raw.bomSource === 'solidworks_csv' && validSaved.length
+    ? validSaved
+    : defaultConfig.components.map(base => {
+        const prior = validSaved.find(item => normalize(item.name) === normalize(base.name));
+        return prior ? { ...base, category: prior.category } : base;
+      });
   return { ...defaultConfig, ...raw, components };
 }
 

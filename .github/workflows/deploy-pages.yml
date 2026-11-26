@@ -32,6 +32,9 @@ jobs:
         run: npm install
       - name: Build
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://bvrehgyjxbwlrcbdxdos.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_M9Wut6pp21J8OlWLXi1jfg_rT7JdqS3
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload build artifact

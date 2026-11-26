@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, Archive, ArrowRight, Bell, Boxes, Building2, Calculator, Layers3,
   Check, ChevronDown, CircleHelp, ClipboardList, Cog, Factory, FilePlus2,
@@ -81,6 +81,7 @@ export default function App() {
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [pendingRequestCount, setPendingRequestCount] = useState(0);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const notificationRef = useRef<HTMLDivElement>(null);
   const [requestsRefresh, setRequestsRefresh] = useState(0);
   const [usersLoading, setUsersLoading] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -96,6 +97,28 @@ export default function App() {
   const [materialCurrency, setMaterialCurrency] = useState<'MXN' | 'USD'>('MXN');
   const [materialNotes, setMaterialNotes] = useState('');
   const [materialSearch, setMaterialSearch] = useState('');
+
+  useEffect(() => {
+    if (!notificationOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !notificationRef.current?.contains(event.target)) {
+        setNotificationOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNotificationOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [notificationOpen]);
+
+  useEffect(() => {
+    setNotificationOpen(false);
+  }, [page]);
 
   const role = profile?.role;
   const title = page === 'perfil' ? 'Mi perfil' : [...base, ...(role === 'administrador' ? admin : [])].find(item => item[0] === page)?.[1] || 'Inicio';
@@ -482,7 +505,7 @@ export default function App() {
         <header>
           <button className="hamb" aria-label="Abrir menú" onClick={() => setMobile(true)}><Menu/></button>
           <span>ConveyorQuote　/　<b>{title}</b></span>
-          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap"><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{pendingRequestCount > 0 ? <><p>{pendingRequestCount === 1 ? 'Tienes una solicitud de acceso pendiente.' : `Tienes ${pendingRequestCount} solicitudes de acceso pendientes.`}</p><button type="button" className="primary" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Revisar solicitudes <ArrowRight/></button></> : <p>No tienes solicitudes pendientes.</p>}</div>}</div>}<i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
+          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap" ref={notificationRef}><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{pendingRequestCount > 0 ? <><p>{pendingRequestCount === 1 ? 'Tienes una solicitud de acceso pendiente.' : `Tienes ${pendingRequestCount} solicitudes de acceso pendientes.`}</p><button type="button" className="primary" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Revisar solicitudes <ArrowRight/></button></> : <p>No tienes solicitudes pendientes.</p>}</div>}</div>}<i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
         </header>
         <div className="content">
           {error && <div className="error-message page-error">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}

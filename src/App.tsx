@@ -1,7 +1,7 @@
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, Archive, ArrowRight, Bell, Boxes, Building2, Calculator, Layers3,
+  Activity, Archive, ArrowRight, Bell, Boxes, Building2, Calculator, Eye, Layers3,
   Check, ChevronDown, CircleHelp, ClipboardList, Cog, Factory, FilePlus2,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings,
   ShieldCheck, Truck, UserRound, Users, X
@@ -58,6 +58,9 @@ export default function App() {
   const [profilePassword, setProfilePassword] = useState('');
   const [profilePasswordConfirm, setProfilePasswordConfirm] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
+  const [showProfilePassword, setShowProfilePassword] = useState(false);
+  const [showProfilePasswordConfirm, setShowProfilePasswordConfirm] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
@@ -123,6 +126,7 @@ export default function App() {
   }, [page]);
 
   const role = profile?.role;
+  const userInitials = role === 'administrador' ? 'AD' : getInitials(profile?.full_name || session?.user.email || 'Vendedor');
   const title = page === 'perfil' ? 'Mi perfil' : [...base, ...(role === 'administrador' ? admin : [])].find(item => item[0] === page)?.[1] || 'Inicio';
 
   useEffect(() => {
@@ -554,7 +558,7 @@ export default function App() {
         <div className="bottom">
           <div className="help"><CircleHelp/> ¿Necesitas ayuda?</div>
           <div className="profile">
-            <span>{role === 'administrador' ? 'AD' : 'VE'}</span>
+            <span>{userInitials}</span>
             <button type="button" className="profile-open" onClick={()=>{setProfileName(profile.full_name || '');setProfilePhone(profile.phone || '');setProfilePassword('');setProfilePasswordConfirm('');setPage('perfil');setMobile(false);}}><b>{profile.full_name || session.user.email}<small>{role === 'administrador' ? 'Administrador · Mi perfil' : 'Vendedor · Mi perfil'}</small></b></button>
             <button aria-label="Cerrar sesión" onClick={handleLogout} disabled={busy}><LogOut/></button>
           </div>
@@ -564,7 +568,7 @@ export default function App() {
         <header>
           <button className="hamb" aria-label="Abrir menú" onClick={() => setMobile(true)}><Menu/></button>
           <span>ConveyorQuote　/　<b>{title}</b></span>
-          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap" ref={notificationRef}><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{unreadRequests.length > 0 ? <div className="notification-list">{unreadRequests.map(request => <button type="button" className="notification-item" key={request.id} onClick={() => void openRegistrationNotification(request)}><span><strong>{request.full_name}</strong><small>{request.email}</small></span><ArrowRight/></button>)}</div> : <p>No tienes notificaciones nuevas.</p>}<button type="button" className="notification-link" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Ver todas las solicitudes <ArrowRight/></button></div>}</div>}<i>{role === 'administrador' ? 'AD' : 'VE'}</i></div>
+          <div className="top"><small className="connected">● Conectado</small>{role === 'administrador' && <div className="notification-wrap" ref={notificationRef}><button type="button" className="notification-button" aria-label={`Notificaciones: ${pendingRequestCount} solicitudes pendientes`} aria-expanded={notificationOpen} onClick={() => setNotificationOpen(open => !open)}><Bell/>{pendingRequestCount > 0 && <span className="notification-count">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</span>}</button>{notificationOpen && <div className="notification-menu"><b>Notificaciones</b>{unreadRequests.length > 0 ? <div className="notification-list">{unreadRequests.map(request => <button type="button" className="notification-item" key={request.id} onClick={() => void openRegistrationNotification(request)}><span><strong>{request.full_name}</strong><small>{request.email}</small></span><ArrowRight/></button>)}</div> : <p>No tienes notificaciones nuevas.</p>}<button type="button" className="notification-link" onClick={() => { setNotificationOpen(false); setRequestsRefresh(value => value + 1); setPage('usuarios'); }}>Ver todas las solicitudes <ArrowRight/></button></div>}</div>}<i>{userInitials}</i></div>
         </header>
         <div className="content">
           {error && <div className="error-message page-error">{error}<button onClick={() => setError('')}><X size={15}/></button></div>}
@@ -634,8 +638,8 @@ export default function App() {
                 <label>Teléfono</label><input value={profilePhone} onChange={e=>setProfilePhone(e.target.value)} maxLength={40} placeholder="Teléfono de contacto"/>
                 <div className="profile-divider"/>
                 <h3>Cambiar contraseña</h3><p>Deja estos campos vacíos si no deseas cambiarla. Usa al menos 12 caracteres.</p>
-                <label>Nueva contraseña</label><input type="password" autoComplete="new-password" minLength={12} value={profilePassword} onChange={e=>setProfilePassword(e.target.value)}/>
-                <label>Confirmar nueva contraseña</label><input type="password" autoComplete="new-password" minLength={12} value={profilePasswordConfirm} onChange={e=>setProfilePasswordConfirm(e.target.value)}/>
+                <label>Nueva contraseña</label><div className="password-field"><input type={showProfilePassword ? "text" : "password"} autoComplete="new-password" minLength={12} value={profilePassword} onChange={e=>setProfilePassword(e.target.value)}/><button type="button" className="password-toggle" aria-label={showProfilePassword ? "Ocultar contraseña" : "Mostrar contraseña"} aria-pressed={showProfilePassword} onClick={()=>setShowProfilePassword(value=>!value)}>{showProfilePassword ? <X size={17}/> : <Eye size={17}/>}</button></div>
+                <label>Confirmar nueva contraseña</label><div className="password-field"><input type={showProfilePasswordConfirm ? "text" : "password"} autoComplete="new-password" minLength={12} value={profilePasswordConfirm} onChange={e=>setProfilePasswordConfirm(e.target.value)}/><button type="button" className="password-toggle" aria-label={showProfilePasswordConfirm ? "Ocultar contraseña" : "Mostrar contraseña"} aria-pressed={showProfilePasswordConfirm} onClick={()=>setShowProfilePasswordConfirm(value=>!value)}>{showProfilePasswordConfirm ? <X size={17}/> : <Eye size={17}/>}</button></div>
                 <button className="primary" disabled={busy||!profileName.trim()}>{busy?'Guardando…':'Guardar mi perfil'} <Check/></button>
               </form>
             </section>
@@ -647,7 +651,7 @@ export default function App() {
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>
       </main>
-      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => !busy && setUserModal(false)} disabled={busy}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p>{editingUser ? 'Actualiza sus datos, permisos y, si es necesario, restablece su contraseña.' : 'Define las credenciales iniciales. La contraseña debe tener al menos 12 caracteres.'}</p>{userFormError && <div className="error-message">{userFormError}</div>}<label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial *'}</label><input type="password" autoComplete="new-password" minLength={12} value={newUserPassword} onChange={event => setNewUserPassword(event.target.value)} required={!editingUser} placeholder="Mínimo 12 caracteres"/><label>Rol</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim() || (!editingUser && newUserPassword.length<12)}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'} <Check/></button></form></div>}
+      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => !busy && setUserModal(false)} disabled={busy}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>{editingUser ? 'Editar usuario' : 'Crear usuario'}</h2><p>{editingUser ? 'Actualiza sus datos, permisos y, si es necesario, restablece su contraseña.' : 'Define las credenciales iniciales. La contraseña debe tener al menos 12 caracteres.'}</p>{userFormError && <div className="error-message">{userFormError}</div>}<label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>{editingUser ? 'Nueva contraseña (opcional)' : 'Contraseña inicial *'}</label><div className="password-field"><input type={showNewUserPassword ? "text" : "password"} autoComplete="new-password" minLength={12} value={newUserPassword} onChange={event => setNewUserPassword(event.target.value)} required={!editingUser} placeholder="Mínimo 12 caracteres"/><button type="button" className="password-toggle" aria-label={showNewUserPassword ? "Ocultar contraseña" : "Mostrar contraseña"} aria-pressed={showNewUserPassword} onClick={()=>setShowNewUserPassword(value=>!value)}>{showNewUserPassword ? <X size={17}/> : <Eye size={17}/>}</button></div><label>Rol</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim() || (!editingUser && newUserPassword.length<12)}>{busy ? 'Guardando…' : editingUser ? 'Guardar cambios' : 'Crear cuenta'} <Check/></button></form></div>}
       {materialModal && <div className="overlay" onClick={() => !busy && setMaterialModal(false)}><form className="dialog client-form" onSubmit={handleSaveMaterial} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setMaterialModal(false)}><X/></button><small>CATÁLOGO DE MATERIALES</small><h2>{editingMaterial ? 'Editar material' : 'Agregar material'}</h2><p>Registra el material y su precio de compra vigente. Los precios se podrán ajustar posteriormente.</p><label>Nombre *</label><input value={materialName} onChange={event => setMaterialName(event.target.value)} required maxLength={150} placeholder="Ej. PTR 2 x 2 cal. 14"/><div className="form-grid"><div><label>Categoría *</label><select value={materialCategory} onChange={event => setMaterialCategory(event.target.value)}><option>Estructura</option><option>Lámina</option><option>Rodillos</option><option>Rodamientos</option><option>Transmisión</option><option>Motorización</option><option>Eléctrico</option><option>Consumibles</option><option>Otros</option></select></div><div><label>Unidad *</label><select value={materialUnit} onChange={event => setMaterialUnit(event.target.value)}><option>pieza</option><option>metro</option><option>kg</option><option>m²</option><option>juego</option><option>litro</option><option>servicio</option></select></div></div><div className="form-grid"><div><label>Código / SKU</label><input value={materialSku} onChange={event => setMaterialSku(event.target.value)} maxLength={60}/></div><div><label>Proveedor</label><input value={materialSupplier} onChange={event => setMaterialSupplier(event.target.value)} maxLength={120}/></div></div><div className="form-grid"><div><label>Precio unitario *</label><input type="number" min="0" step="0.01" value={materialPrice} onChange={event => setMaterialPrice(event.target.value)} required/></div><div><label>Moneda</label><select value={materialCurrency} onChange={event => setMaterialCurrency(event.target.value as 'MXN' | 'USD')}><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div><label>Notas</label><textarea rows={2} value={materialNotes} onChange={event => setMaterialNotes(event.target.value)} maxLength={1000}/><button className="primary" disabled={busy || !materialName.trim()}>{busy ? 'Guardando…' : 'Guardar material'} <Check/></button></form></div>}
       {modal && <div className="overlay" onClick={() => !busy && setModal(false)}>
         <form className="dialog client-form" onSubmit={handleCreateClient} onClick={event => event.stopPropagation()}>
@@ -663,6 +667,12 @@ export default function App() {
       </div>}
     </div>
   );
+}
+
+function getInitials(value: string) {
+  const parts = value.trim().split(/\\s+/).filter(Boolean);
+  if (!parts.length) return 'VE';
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toLocaleUpperCase('es-MX');
 }
 
 function Empty({ icon: Icon, title, desc }: { icon: any; title: string; desc: string }) {

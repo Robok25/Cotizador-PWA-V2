@@ -179,18 +179,19 @@ export default function App() {
   }, [session, profile, page]);
 
   useEffect(() => {
-    if (!supabase || !session || role !== 'administrador') { setPendingRequestCount(0); return; }
+    const client = supabase;
+    if (!client || !session || role !== 'administrador') { setPendingRequestCount(0); return; }
     let active = true;
     const refreshPendingCount = async () => {
-      const { count, error: countError } = await supabase.from('registration_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+      const { count, error: countError } = await client.from('registration_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending');
       if (active && !countError) setPendingRequestCount(count || 0);
     };
     void refreshPendingCount();
     const interval = window.setInterval(refreshPendingCount, 30000);
-    const channel = supabase.channel('registration-requests-notifications')
+    const channel = client.channel('registration-requests-notifications')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'registration_requests' }, () => { void refreshPendingCount(); })
       .subscribe();
-    return () => { active = false; window.clearInterval(interval); void supabase.removeChannel(channel); };
+    return () => { active = false; window.clearInterval(interval); void client.removeChannel(channel); };
   }, [session, role]);
 
   useEffect(() => {
@@ -318,7 +319,7 @@ export default function App() {
     setBusy(true); setError('');
     const { error: updateError } = await supabase.from('registration_requests').update({ status, reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', request.id);
     if (updateError) setError('No se pudo actualizar la solicitud: ' + updateError.message);
-    else { setRegistrationRequests(items => items.map(item => item.id === request.id ? { ...item, status } : item)); if (status !== 'pending') setPendingRequestCount(count => Math.max(0, count - 1)); }
+    else { setRegistrationRequests(items => items.map(item => item.id === request.id ? { ...item, status } : item)); setPendingRequestCount(count => Math.max(0, count - 1)); }
     setBusy(false);
   }
 

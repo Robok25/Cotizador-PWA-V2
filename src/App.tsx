@@ -1,16 +1,17 @@
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, Archive, ArrowRight, Bell, Boxes, Building2, Calculator,
+  Activity, Archive, ArrowRight, Bell, Boxes, Building2, Calculator, Layers3,
   Check, ChevronDown, CircleHelp, ClipboardList, Cog, Factory, FilePlus2,
   LayoutDashboard, LogOut, Menu, Package, Plus, Search, Settings,
   ShieldCheck, Truck, UserRound, Users, X
 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
+import ModularBeltConveyor from './components/ModularBeltConveyor';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 
 type Role = 'vendedor' | 'administrador';
-type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion';
+type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion' | 'banda-modular';
 type Profile = { role: Role; full_name: string | null };
 type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };
 type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
@@ -27,6 +28,7 @@ type Client = {
 const base = [
   ['inicio', 'Inicio', LayoutDashboard],
   ['cotizador', 'Cotizador', Calculator],
+  ['banda-modular', 'Banda modular', Layers3],
   ['clientes', 'Clientes', Building2],
 ] as const;
 const admin = [
@@ -374,7 +376,7 @@ export default function App() {
               </section>
             </div>
           </>}
-          {page === 'cotizador' && <>{heading('VENTAS', 'Crea y administra cotizaciones de sistemas transportadores.', <button className="primary" disabled><Plus/> Nueva cotización</button>)}<Empty icon={Calculator} title="Módulo de cotización" desc="La interfaz está preparada. En la siguiente etapa conectaremos los modelos de conveyors y sus cálculos de costos."/></>}
+          {page === 'cotizador' && <>{heading('VENTAS', 'Selecciona el tipo de equipo que necesitas configurar.')}<button className="equipment-choice" onClick={() => setPage('banda-modular')}><span><Layers3/></span><div><small>FAMILIA 01</small><h2>Conveyor de Banda Modular</h2><p>Configuración inicial del equipo y preparación de componentes.</p></div><ArrowRight/></button><Empty icon={Calculator} title="Más familias de conveyors" desc="Los siguientes modelos se agregarán conforme avancemos con sus especificaciones."/></>}{page === 'banda-modular' && <>{heading('CONFIGURACIÓN DE EQUIPO', 'Primera familia de conveyor del sistema.')}<ModularBeltConveyor/></>}
           {page === 'clientes' && <>
             {heading('DIRECTORIO', 'Los clientes se guardan en Supabase y se muestran según tus permisos.', <button className="primary" onClick={() => setModal(true)}><Plus/> Agregar cliente</button>)}
             <section className="panel table">

@@ -52,6 +52,11 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [modal, setModal] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [userModal, setUserModal] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserRole, setNewUserRole] = useState<Role>('vendedor');
   const [companyName, setCompanyName] = useState('');
   const [contactName, setContactName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
@@ -184,6 +189,10 @@ export default function App() {
     );
   }, [clients, search]);
 
+  function openClient(client?: Client) {
+    setEditingClient(client || null); setCompanyName(client?.company_name || ''); setContactName(client?.contact_name || ''); setClientEmail(client?.email || ''); setPhone(client?.phone || ''); setTaxId(client?.tax_id || ''); setNotes(''); setModal(true);
+  }
+
   function openMaterial(material?: Material) {
     setEditingMaterial(material || null);
     setMaterialName(material?.name || '');
@@ -235,6 +244,27 @@ export default function App() {
     setBusy(false);
   }
 
+  async function handleDeleteClient(client: Client) {
+    if (!supabase || !window.confirm(`¿Eliminar al cliente ${client.company_name}?`)) return;
+    setBusy(true); setError(''); const { error: e } = await supabase.from('clients').delete().eq('id', client.id);
+    if (e) setError('No se pudo eliminar el cliente: ' + e.message); else setClients(items => items.filter(item => item.id !== client.id)); setBusy(false);
+  }
+
+  async function handleDeleteMaterial(material: Material) {
+    if (!supabase || !window.confirm(`¿Eliminar definitivamente ${material.name}?`)) return;
+    setBusy(true); setError(''); const { error: e } = await supabase.from('materials').delete().eq('id', material.id);
+    if (e) setError('No se pudo eliminar el material: ' + e.message); else setMaterials(items => items.filter(item => item.id !== material.id)); setBusy(false);
+  }
+
+  async function handleInviteUser(event: FormEvent) {
+    event.preventDefault(); if (!supabase || role !== 'administrador') return;
+    setBusy(true); setError('');
+    const { data, error: e } = await supabase.functions.invoke('admin-users', { body: { action: 'invite', email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } });
+    if (e || data?.error) setError('No se pudo invitar al usuario: ' + (data?.error || e?.message));
+    else { setUserModal(false); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setError('Invitación enviada. El usuario recibirá un correo para establecer su contraseña.'); }
+    setBusy(false);
+  }
+
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
     if (!supabase) return;
@@ -260,23 +290,15 @@ export default function App() {
     if (!supabase || !session?.user) return;
     setBusy(true);
     setError('');
-    const { data, error: insertError } = await supabase
-      .from('clients')
-      .insert({
-        company_name: companyName.trim(),
-        contact_name: contactName.trim() || null,
-        email: clientEmail.trim() || null,
-        phone: phone.trim() || null,
-        tax_id: taxId.trim() || null,
-        notes: notes.trim() || null,
-        created_by: session.user.id,
-      })
-      .select('id, company_name, contact_name, email, phone, tax_id, created_at')
-      .single();
+    const values = { company_name: companyName.trim(), contact_name: contactName.trim() || null, email: clientEmail.trim() || null, phone: phone.trim() || null, tax_id: taxId.trim() || null, notes: notes.trim() || null };
+    const { data, error: insertError } = editingClient
+      ? await supabase.from('clients').update(values).eq('id', editingClient.id).select('id, company_name, contact_name, email, phone, tax_id, created_at').single()
+      : await supabase.from('clients').insert({ ...values, created_by: session.user.id }).select('id, company_name, contact_name, email, phone, tax_id, created_at').single();
     if (insertError) {
       setError('No se pudo guardar el cliente: ' + insertError.message);
     } else {
-      setClients(current => [...current, data as Client].sort((a, b) => a.company_name.localeCompare(b.company_name)));
+      setClients(current => (editingClient ? current.map(item => item.id === editingClient.id ? data as Client : item) : [...current, data as Client]).sort((a, b) => a.company_name.localeCompare(b.company_name)));
+      setEditingClient(null);
       setModal(false);
       setCompanyName('');
       setContactName('');
@@ -378,12 +400,12 @@ export default function App() {
           </>}
           {page === 'cotizador' && <>{heading('VENTAS', 'Selecciona el tipo de equipo que necesitas configurar.')}<button className="equipment-choice" onClick={() => setPage('banda-modular')}><span><Layers3/></span><div><small>FAMILIA 01</small><h2>Conveyor de Banda Modular</h2><p>Configuración inicial del equipo y preparación de componentes.</p></div><ArrowRight/></button><Empty icon={Calculator} title="Más familias de conveyors" desc="Los siguientes modelos se agregarán conforme avancemos con sus especificaciones."/></>}{page === 'banda-modular' && <>{heading('CONFIGURACIÓN DE EQUIPO', 'Primera familia de conveyor del sistema.')}<ModularBeltConveyor/></>}
           {page === 'clientes' && <>
-            {heading('DIRECTORIO', 'Los clientes se guardan en Supabase y se muestran según tus permisos.', <button className="primary" onClick={() => setModal(true)}><Plus/> Agregar cliente</button>)}
+            {heading('DIRECTORIO', 'Administra los registros de clientes desde ConveyorQuote.', <button className="primary" onClick={() => openClient()}><Plus/> Agregar cliente</button>)}
             <section className="panel table">
               <div className="search"><Search/><input placeholder="Buscar cliente..." value={search} onChange={event => setSearch(event.target.value)}/><small>{clients.length} clientes visibles</small></div>
               {clientsLoading ? <div className="table-empty">Cargando clientes…</div> : filteredClients.length === 0 ? <div className="table-empty"><Users/><b>{clients.length ? 'No hay coincidencias' : 'Todavía no hay clientes'}</b><span>{clients.length ? 'Prueba con otro término de búsqueda.' : 'Registra el primer cliente para probar el almacenamiento.'}</span></div> : (
-                <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Empresa</th><th>Contacto</th><th>Correo</th><th>Teléfono</th><th>RFC</th></tr></thead><tbody>
-                  {filteredClients.map(client => <tr key={client.id}><td><b>{client.company_name}</b></td><td>{client.contact_name || '—'}</td><td>{client.email || '—'}</td><td>{client.phone || '—'}</td><td>{client.tax_id || '—'}</td></tr>)}
+                <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Empresa</th><th>Contacto</th><th>Correo</th><th>Teléfono</th><th>RFC</th><th>Acciones</th></tr></thead><tbody>
+                  {filteredClients.map(client => <tr key={client.id}><td><b>{client.company_name}</b></td><td>{client.contact_name || '—'}</td><td>{client.email || '—'}</td><td>{client.phone || '—'}</td><td>{client.tax_id || '—'}</td><td><button className="table-action" onClick={() => openClient(client)}>Editar</button>{role === 'administrador' && <button className="table-action danger" onClick={() => void handleDeleteClient(client)} disabled={busy}>Eliminar</button>}</td></tr>)}
                 </tbody></table></div>
               )}
             </section>
@@ -392,15 +414,15 @@ export default function App() {
             {heading('ADMINISTRACIÓN', page === 'materiales' ? 'Administra perfiles, componentes y consumibles utilizados en tus conveyors.' : 'Consulta y actualiza los precios unitarios del catálogo.', page === 'materiales' ? <button className="primary" onClick={() => openMaterial()}><Plus/> Agregar material</button> : undefined)}
             <section className="panel table">
               <div className="search"><Search/><input placeholder="Buscar por nombre, categoría, código o proveedor..." value={materialSearch} onChange={event => setMaterialSearch(event.target.value)}/><small>{filteredMaterials.length} registros</small></div>
-              {materialsLoading ? <div className="table-empty">Cargando catálogo…</div> : filteredMaterials.length === 0 ? <div className="table-empty"><Boxes/><b>{materials.length ? 'No hay coincidencias' : 'Catálogo vacío'}</b><span>{materials.length ? 'Prueba con otro término.' : 'Agrega los materiales y componentes que utilizas en tus conveyors.'}</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Material</th><th>Categoría</th><th>Código</th><th>Unidad</th><th>Proveedor</th><th>Precio unitario</th><th>Estado</th>{page === 'materiales' && <th>Acciones</th>}</tr></thead><tbody>{filteredMaterials.map(item => <tr key={item.id}><td><b>{item.name}</b></td><td>{item.category}</td><td>{item.sku || '—'}</td><td>{item.unit}</td><td>{item.supplier || '—'}</td><td><b>{new Intl.NumberFormat('es-MX',{style:'currency',currency:item.currency}).format(item.unit_price)}</b></td><td><span className={item.active ? 'status-active' : 'status-inactive'}>{item.active ? 'Activo' : 'Inactivo'}</span></td>{page === 'materiales' && <td><button className="table-action" onClick={() => openMaterial(item)}>Editar</button><button className="table-action" onClick={() => toggleMaterial(item)} disabled={busy}>{item.active ? 'Desactivar' : 'Activar'}</button></td>}</tr>)}</tbody></table></div>}
+              {materialsLoading ? <div className="table-empty">Cargando catálogo…</div> : filteredMaterials.length === 0 ? <div className="table-empty"><Boxes/><b>{materials.length ? 'No hay coincidencias' : 'Catálogo vacío'}</b><span>{materials.length ? 'Prueba con otro término.' : 'Agrega los materiales y componentes que utilizas en tus conveyors.'}</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Material</th><th>Categoría</th><th>Código</th><th>Unidad</th><th>Proveedor</th><th>Precio unitario</th><th>Estado</th>{page === 'materiales' && <th>Acciones</th>}</tr></thead><tbody>{filteredMaterials.map(item => <tr key={item.id}><td><b>{item.name}</b></td><td>{item.category}</td><td>{item.sku || '—'}</td><td>{item.unit}</td><td>{item.supplier || '—'}</td><td><b>{new Intl.NumberFormat('es-MX',{style:'currency',currency:item.currency}).format(item.unit_price)}</b></td><td><span className={item.active ? 'status-active' : 'status-inactive'}>{item.active ? 'Activo' : 'Inactivo'}</span></td>{page === 'materiales' && <td><button className="table-action" onClick={() => openMaterial(item)}>Editar</button><button className="table-action" onClick={() => toggleMaterial(item)} disabled={busy}>{item.active ? 'Desactivar' : 'Activar'}</button><button className="table-action danger" onClick={() => void handleDeleteMaterial(item)} disabled={busy}>Eliminar</button></td>}</tr>)}</tbody></table></div>}
             </section>
           </>}
           {page === 'usuarios' && role === 'administrador' && <>
-            {heading('ADMINISTRACIÓN', 'Consulta los usuarios registrados y asigna permisos de vendedor o administrador.')}
+            {heading('ADMINISTRACIÓN', 'Invita usuarios y administra sus permisos desde ConveyorQuote.', <button className="primary" onClick={() => setUserModal(true)}><Plus/> Invitar usuario</button>)}
             <section className="panel table">
               <div className="search"><Users/><span className="search-label">Usuarios registrados</span><small>{users.length} usuarios</small></div>
               {usersLoading ? <div className="table-empty">Cargando usuarios…</div> : users.length === 0 ? <div className="table-empty"><Users/><b>No hay usuarios registrados</b><span>Los usuarios creados en Supabase aparecerán aquí automáticamente.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Usuario</th><th>Correo electrónico</th><th>Rol</th><th>Registro</th></tr></thead><tbody>{users.map(user => <tr key={user.id}><td><b>{user.full_name || 'Sin nombre'}</b>{user.id === session.user.id && <small className="you-label">Tú</small>}</td><td>{user.email || '—'}</td><td>{user.id === session.user.id ? <span className="status-active">Administrador actual</span> : <select className="role-select" aria-label={'Rol de ' + (user.email || user.id)} value={user.role} disabled={busy} onChange={event => void handleUserRoleChange(user, event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select>}</td><td>{new Date(user.created_at).toLocaleDateString('es-MX')}</td></tr>)}</tbody></table></div>}
-              <p className="users-note">Para crear o invitar usuarios, utiliza Authentication → Users en Supabase. Por seguridad, la aplicación no almacena contraseñas ni utiliza claves administrativas en el navegador.</p>
+              <p className="users-note">Las invitaciones se envían por correo. Cada usuario establece su propia contraseña desde el enlace recibido.</p>
             </section>
           </>}
           {page === 'configuracion' && <>
@@ -410,17 +432,18 @@ export default function App() {
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>
       </main>
+      {userModal && <div className="overlay" onClick={() => !busy && setUserModal(false)}><form className="dialog client-form" onSubmit={handleInviteUser} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setUserModal(false)}><X/></button><small>ADMINISTRACIÓN DE ACCESOS</small><h2>Invitar usuario</h2><p>Se enviará un enlace de invitación al correo indicado.</p><label>Nombre completo *</label><input value={newUserName} onChange={event => setNewUserName(event.target.value)} required maxLength={120}/><label>Correo electrónico *</label><input type="email" value={newUserEmail} onChange={event => setNewUserEmail(event.target.value)} required/><label>Rol inicial</label><select value={newUserRole} onChange={event => setNewUserRole(event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select><button className="primary" disabled={busy || !newUserEmail.trim() || !newUserName.trim()}>{busy ? 'Enviando…' : 'Enviar invitación'} <Check/></button></form></div>}
       {materialModal && <div className="overlay" onClick={() => !busy && setMaterialModal(false)}><form className="dialog client-form" onSubmit={handleSaveMaterial} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setMaterialModal(false)}><X/></button><small>CATÁLOGO DE MATERIALES</small><h2>{editingMaterial ? 'Editar material' : 'Agregar material'}</h2><p>Registra el material y su precio de compra vigente. Los precios se podrán ajustar posteriormente.</p><label>Nombre *</label><input value={materialName} onChange={event => setMaterialName(event.target.value)} required maxLength={150} placeholder="Ej. PTR 2 x 2 cal. 14"/><div className="form-grid"><div><label>Categoría *</label><select value={materialCategory} onChange={event => setMaterialCategory(event.target.value)}><option>Estructura</option><option>Lámina</option><option>Rodillos</option><option>Rodamientos</option><option>Transmisión</option><option>Motorización</option><option>Eléctrico</option><option>Consumibles</option><option>Otros</option></select></div><div><label>Unidad *</label><select value={materialUnit} onChange={event => setMaterialUnit(event.target.value)}><option>pieza</option><option>metro</option><option>kg</option><option>m²</option><option>juego</option><option>litro</option><option>servicio</option></select></div></div><div className="form-grid"><div><label>Código / SKU</label><input value={materialSku} onChange={event => setMaterialSku(event.target.value)} maxLength={60}/></div><div><label>Proveedor</label><input value={materialSupplier} onChange={event => setMaterialSupplier(event.target.value)} maxLength={120}/></div></div><div className="form-grid"><div><label>Precio unitario *</label><input type="number" min="0" step="0.01" value={materialPrice} onChange={event => setMaterialPrice(event.target.value)} required/></div><div><label>Moneda</label><select value={materialCurrency} onChange={event => setMaterialCurrency(event.target.value as 'MXN' | 'USD')}><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div><label>Notas</label><textarea rows={2} value={materialNotes} onChange={event => setMaterialNotes(event.target.value)} maxLength={1000}/><button className="primary" disabled={busy || !materialName.trim()}>{busy ? 'Guardando…' : 'Guardar material'} <Check/></button></form></div>}
       {modal && <div className="overlay" onClick={() => !busy && setModal(false)}>
         <form className="dialog client-form" onSubmit={handleCreateClient} onClick={event => event.stopPropagation()}>
           <button type="button" className="close-dialog" onClick={() => setModal(false)}><X/></button>
-          <small>DIRECTORIO</small><h2>Agregar cliente</h2><p>Completa los datos disponibles. La empresa es el único campo obligatorio.</p>
+          <small>DIRECTORIO</small><h2>{editingClient ? 'Editar cliente' : 'Agregar cliente'}</h2><p>Completa los datos disponibles. La empresa es el único campo obligatorio.</p>
           <label>Empresa / razón social *</label><input value={companyName} onChange={event => setCompanyName(event.target.value)} required maxLength={150} placeholder="Nombre de la empresa"/>
           <label>Nombre de contacto</label><input value={contactName} onChange={event => setContactName(event.target.value)} maxLength={120} placeholder="Nombre del contacto"/>
           <div className="form-grid"><div><label>Correo electrónico</label><input type="email" value={clientEmail} onChange={event => setClientEmail(event.target.value)} placeholder="contacto@empresa.com"/></div><div><label>Teléfono</label><input value={phone} onChange={event => setPhone(event.target.value)} maxLength={40} placeholder="Teléfono"/></div></div>
           <label>RFC</label><input value={taxId} onChange={event => setTaxId(event.target.value)} maxLength={20} placeholder="RFC"/>
           <label>Notas</label><textarea value={notes} onChange={event => setNotes(event.target.value)} rows={2} maxLength={1000} placeholder="Información adicional"/>
-          <button className="primary" disabled={busy || !companyName.trim()}>{busy ? 'Guardando…' : 'Guardar cliente'} <Check/></button>
+          <button className="primary" disabled={busy || !companyName.trim()}>{busy ? 'Guardando…' : editingClient ? 'Guardar cambios' : 'Guardar cliente'} <Check/></button>
         </form>
       </div>}
     </div>

@@ -407,8 +407,17 @@ export default function App() {
                 event.preventDefault(); if (!supabase) return;
                 setBusy(true); setError('');
                 const { data, error: requestError } = await supabase.functions.invoke('registration-requests', { body: { full_name: requestName, email: requestEmail, company: requestCompany, reason: requestReason, website: requestWebsite } });
-                if (requestError || data?.error) setError(data?.error || requestError?.message || 'No se pudo enviar la solicitud.');
-                else { setError('Solicitud registrada. El administrador recibirá una notificación dentro de ConveyorQuote y podrá revisar tu acceso desde Administración → Usuarios.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
+                if (requestError || data?.error) {
+                  let detail = data?.error || requestError?.message || 'No se pudo enviar la solicitud.';
+                  if (requestError && 'context' in requestError && requestError.context instanceof Response) {
+                    try {
+                      const responseBody = await requestError.context.clone().json() as { error?: string };
+                      if (responseBody.error) detail = responseBody.error;
+                    } catch { /* La respuesta puede no contener JSON. */ }
+                    detail += ` (HTTP ${requestError.context.status})`;
+                  }
+                  setError(detail);
+                } else { setError('Solicitud registrada. El administrador recibirá una notificación dentro de ConveyorQuote y podrá revisar tu acceso desde Administración → Usuarios.'); setRequestName(''); setRequestEmail(''); setRequestCompany(''); setRequestReason(''); }
                 setBusy(false);
               }}>
                 <label>Nombre completo *</label><input value={requestName} onChange={e=>setRequestName(e.target.value)} required maxLength={120}/>

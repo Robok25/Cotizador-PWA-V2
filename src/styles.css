@@ -33,3 +33,13 @@
 .component-rule{border-top:1px solid var(--line);font-size:11px;color:#405a62}
 .component-rule b{font-weight:700;color:#304b54}
 @media(max-width:760px){.manufacturing-settings{grid-template-columns:1fr}.manufacturing-setting{grid-template-columns:1fr 1fr}.component-rule-header,.component-rule{grid-template-columns:minmax(130px,.8fr) minmax(190px,1.2fr);gap:8px;padding:9px}.component-rule select{font-size:10px;padding:8px}}
+
+
+/* Despiece cuantificado desde el ensamble STEP */
+.component-bom-header,.component-bom-row{grid-template-columns:minmax(190px,1.5fr) 70px minmax(205px,1.2fr)}
+.component-bom-name{display:grid;gap:4px;min-width:0}
+.component-bom-name b{font-weight:700;color:#304b54;overflow-wrap:anywhere}
+.component-bom-name small{font-size:9px;line-height:1.4;color:#829197;font-weight:500}
+.component-bom-name .flat-pattern-flag{color:#b85e2a;font-weight:800}
+.component-quantity{font-variant-numeric:tabular-nums;text-align:center;color:#29444d;font-size:12px}
+@media(max-width:760px){.component-bom-header,.component-bom-row{grid-template-columns:minmax(145px,1.2fr) 48px minmax(175px,1.3fr);gap:7px;padding:9px}.component-bom-name small{font-size:8px}}

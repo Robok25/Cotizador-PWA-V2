@@ -344,7 +344,7 @@ export default function App() {
           <footer>PLATAFORMA DE COTIZACIÓN <span>VERSIÓN 0.2</span></footer>
         </section>
         <section className="login-side">
-          <form onSubmit={handleLogin}>
+          <div className="login-form">
             <div className="mobile-logo"><Truck/><b>CONVEYOR<span>QUOTE</span></b></div>
             <small>ACCESO A LA PLATAFORMA</small>
             {requestMode ? <>
@@ -367,6 +367,7 @@ export default function App() {
               </form>
               <button type="button" className="login-link" onClick={()=>{setRequestMode(false);setError('');}}>Volver a iniciar sesión</button>
             </> : <>
+              <form onSubmit={handleLogin}>
               <h2>Iniciar sesión</h2>
               <p>Ingresa con las credenciales que te proporcionó el administrador.</p>
               <label>Correo electrónico</label>
@@ -375,11 +376,12 @@ export default function App() {
               <div className="field"><ShieldCheck/><input type="password" autoComplete="current-password" placeholder="Ingresa tu contraseña" value={password} onChange={event => setPassword(event.target.value)} required/></div>
               <button className="primary" disabled={!isSupabaseConfigured || busy}>{busy ? 'Conectando…' : 'Entrar'} <ArrowRight/></button>
               <button type="button" className="login-link" onClick={()=>{setRequestMode(true);setError('');}}>Solicitar acceso</button>
+              </form>
             </>}
             {!isSupabaseConfigured && <div className="setup-message">Falta configurar la conexión con Supabase.</div>}
             {error && <div className="error-message">{error}</div>}
             <div className="demo">● Acceso controlado · autenticación segura</div>
-          </form>
+          </div>
           <footer>© 2026 ConveyorQuote · Plataforma de cotización</footer>
         </section>
       </main>

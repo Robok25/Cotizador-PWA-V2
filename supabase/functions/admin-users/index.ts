@@ -76,3 +76,4 @@ Deno.serve(async (req: Request) => {
   }
   return json({ success: true, invited: email });
 });
+

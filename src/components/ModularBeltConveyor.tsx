@@ -74,13 +74,13 @@ const categoryLabels: Record<ComponentCategory, string> = {
 };
 
 function normalizeBomText(value: string): string {
-  return value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 function parseDelimitedText(source: string): string[][] {
-  const text = source.replace(/^\\uFEFF/, '');
-  const firstLine = text.split(/\\r?\\n/, 1)[0] || '';
-  const delimiters = [',', ';', '\\t'];
+  const text = source.replace(/^\uFEFF/, '');
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const delimiters = [',', ';', '\t'];
   const delimiter = delimiters
     .map(char => ({ char, count: firstLine.split(char).length - 1 }))
     .sort((a, b) => b.count - a.count)[0].char;
@@ -93,8 +93,8 @@ function parseDelimitedText(source: string): string[][] {
     if (char === '"' && quoted && text[i + 1] === '"') { cell += '"'; i += 1; }
     else if (char === '"') quoted = !quoted;
     else if (char === delimiter && !quoted) { row.push(cell.trim()); cell = ''; }
-    else if ((char === '\\n' || char === '\\r') && !quoted) {
-      if (char === '\\r' && text[i + 1] === '\\n') i += 1;
+    else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && text[i + 1] === '\n') i += 1;
       row.push(cell.trim());
       if (row.some(value => value.length > 0)) rows.push(row);
       row = []; cell = '';
@@ -151,7 +151,7 @@ function readConfig(value: unknown): ManufacturingConfig {
   const saved = Array.isArray(raw.components) ? raw.components : [];
   const validCategory = (category: unknown): category is ComponentCategory =>
     typeof category === 'string' && ['laser_sheet','profile','nylamid','commercial','machined','pending'].includes(category);
-  const normalize = (name: string) => name.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+  const normalize = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const components = defaultConfig.components.map(base => {
     const prior = saved.find(item => item && typeof item.name === 'string' && normalize(item.name) === normalize(base.name));
     return prior && validCategory(prior.category) ? { ...base, category: prior.category } : base;

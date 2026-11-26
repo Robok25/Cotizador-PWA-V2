@@ -13,7 +13,7 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Role = 'vendedor' | 'administrador';
 type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion' | 'banda-modular' | 'perfil';
 type Profile = { role: Role; full_name: string | null; phone?: string | null };
-type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };
+type UserRecord = { id: string; email: string | null; full_name: string | null; role: Role; created_at: string };\ntype RegistrationRequest = { id: string; full_name: string; email: string; company: string | null; reason: string | null; status: 'pending' | 'approved' | 'rejected'; created_at: string };
 type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
 type Client = {
   id: string;
@@ -75,7 +75,7 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [taxId, setTaxId] = useState('');
   const [notes, setNotes] = useState('');
-  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);\n  const [registrationRequests, setRegistrationRequests] = useState<RegistrationRequest[]>([]);\n  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [usersLoading, setUsersLoading] = useState(false);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [materialsLoading, setMaterialsLoading] = useState(false);
@@ -177,10 +177,15 @@ export default function App() {
     async function loadUsers() {
       if (!supabase || !session || role !== 'administrador' || page !== 'usuarios') return;
       setUsersLoading(true);
-      const { data, error: usersError } = await supabase.from('profiles').select('id, email, full_name, role, created_at').order('created_at', { ascending: false });
+      const [{ data, error: usersError }, { data: requests, error: requestsError }] = await Promise.all([
+        supabase.from('profiles').select('id, email, full_name, role, created_at').order('created_at', { ascending: false }),
+        supabase.from('registration_requests').select('id, full_name, email, company, reason, status, created_at').order('created_at', { ascending: false }),
+      ]);
       if (!active) return;
       if (usersError) setError('No se pudieron cargar los usuarios: ' + usersError.message);
       else setUsers((data || []) as UserRecord[]);
+      if (requestsError) setError('No se pudieron cargar las solicitudes de acceso: ' + requestsError.message);
+      else setRegistrationRequests((requests || []) as RegistrationRequest[]);
       setUsersLoading(false);
     }
     void loadUsers();
@@ -280,10 +285,24 @@ export default function App() {
     if (e || data?.error) setError('No se pudo guardar el usuario: ' + (data?.error || e?.message));
     else {
       if (editingUser) setUsers(items => items.map(item => item.id === editingUser.id ? { ...item, email: newUserEmail.trim(), full_name: newUserName.trim(), role: newUserRole } : item));
-      setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
+      if (!editingUser && selectedRequestId) { await supabase.from('registration_requests').update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', selectedRequestId); setRegistrationRequests(items => items.map(item => item.id === selectedRequestId ? { ...item, status: 'approved' } : item)); }\n      setSelectedRequestId(null); setUserModal(false); setEditingUser(null); setNewUserEmail(''); setNewUserName(''); setNewUserRole('vendedor'); setNewUserPassword('');
       setError(editingUser ? 'Usuario actualizado.' : 'Cuenta creada. Entrega al usuario su correo y contraseña inicial por un canal seguro.');
     }
     setBusy(false);
+  }
+
+  async function handleRequestStatus(request: RegistrationRequest, status: 'approved' | 'rejected') {
+    if (!supabase || role !== 'administrador') return;
+    setBusy(true); setError('');
+    const { error: updateError } = await supabase.from('registration_requests').update({ status, reviewed_at: new Date().toISOString(), reviewed_by: session?.user.id }).eq('id', request.id);
+    if (updateError) setError('No se pudo actualizar la solicitud: ' + updateError.message);
+    else setRegistrationRequests(items => items.map(item => item.id === request.id ? { ...item, status } : item));
+    setBusy(false);
+  }
+
+  function createUserFromRequest(request: RegistrationRequest) {
+    setEditingUser(null); setNewUserEmail(request.email); setNewUserName(request.full_name); setNewUserRole('vendedor'); setNewUserPassword('');
+    setSelectedRequestId(request.id); setUserModal(true);
   }
 
   async function handleDeleteUser(user: UserRecord) {
@@ -477,6 +496,10 @@ export default function App() {
               <div className="search"><Users/><span className="search-label">Usuarios registrados</span><small>{users.length} usuarios</small></div>
               {usersLoading ? <div className="table-empty">Cargando usuarios…</div> : users.length === 0 ? <div className="table-empty"><Users/><b>No hay usuarios registrados</b><span>Los usuarios creados en Supabase aparecerán aquí automáticamente.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Usuario</th><th>Correo electrónico</th><th>Rol</th><th>Registro</th><th>Acciones</th></tr></thead><tbody>{users.map(user => <tr key={user.id}><td><b>{user.full_name || 'Sin nombre'}</b>{user.id === session.user.id && <small className="you-label">Tú</small>}</td><td>{user.email || '—'}</td><td>{user.id === session.user.id ? <span className="status-active">Administrador actual</span> : <select className="role-select" aria-label={'Rol de ' + (user.email || user.id)} value={user.role} disabled={busy} onChange={event => void handleUserRoleChange(user, event.target.value as Role)}><option value="vendedor">Vendedor</option><option value="administrador">Administrador</option></select>}</td><td>{new Date(user.created_at).toLocaleDateString('es-MX')}</td><td>{user.id !== session.user.id && <><button className="table-action" onClick={() => openUser(user)}>Editar</button><button className="table-action danger" onClick={() => void handleDeleteUser(user)} disabled={busy}>Eliminar</button></>}</td></tr>)}</tbody></table></div>}
               <p className="users-note">Solo los administradores crean, modifican o eliminan cuentas. La contraseña inicial la establece el administrador y debe entregarse al usuario por un canal seguro.</p>
+            </section>
+            <section className="panel table registration-inbox">
+              <div className="search"><UserRound/><span className="search-label">Solicitudes de acceso</span><small>{registrationRequests.filter(item=>item.status==='pending').length} pendientes</small></div>
+              {registrationRequests.length===0 ? <div className="table-empty"><UserRound/><b>No hay solicitudes</b><span>Las solicitudes enviadas desde el login aparecerán aquí.</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Solicitante</th><th>Correo</th><th>Empresa / motivo</th><th>Fecha</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{registrationRequests.map(request=><tr key={request.id}><td><b>{request.full_name}</b></td><td>{request.email}</td><td>{request.company||'—'}{request.reason&&<small className="request-reason">{request.reason}</small>}</td><td>{new Date(request.created_at).toLocaleDateString('es-MX')}</td><td><span className={request.status==='pending'?'status-pending':request.status==='approved'?'status-active':'status-inactive'}>{request.status==='pending'?'Pendiente':request.status==='approved'?'Aprobada':'Rechazada'}</span></td><td>{request.status==='pending'&&<><button className="table-action" onClick={()=>createUserFromRequest(request)}>Crear cuenta</button><button className="table-action danger" onClick={()=>void handleRequestStatus(request,'rejected')} disabled={busy}>Rechazar</button></>}</td></tr>)}</tbody></table></div>}
             </section>
           </>}
           {page === 'perfil' && <>

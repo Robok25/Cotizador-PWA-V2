@@ -12,6 +12,7 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 type Role = 'vendedor' | 'administrador';
 type Page = 'inicio' | 'cotizador' | 'clientes' | 'usuarios' | 'materiales' | 'precios' | 'configuracion';
 type Profile = { role: Role; full_name: string | null };
+type Material = { id: string; name: string; category: string; sku: string | null; unit: string; supplier: string | null; unit_price: number; currency: 'MXN' | 'USD'; active: boolean; notes: string | null };
 type Client = {
   id: string;
   company_name: string;
@@ -54,6 +55,19 @@ export default function App() {
   const [phone, setPhone] = useState('');
   const [taxId, setTaxId] = useState('');
   const [notes, setNotes] = useState('');
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
+  const [materialModal, setMaterialModal] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
+  const [materialName, setMaterialName] = useState('');
+  const [materialCategory, setMaterialCategory] = useState('Estructura');
+  const [materialSku, setMaterialSku] = useState('');
+  const [materialUnit, setMaterialUnit] = useState('pieza');
+  const [materialSupplier, setMaterialSupplier] = useState('');
+  const [materialPrice, setMaterialPrice] = useState('0');
+  const [materialCurrency, setMaterialCurrency] = useState<'MXN' | 'USD'>('MXN');
+  const [materialNotes, setMaterialNotes] = useState('');
+  const [materialSearch, setMaterialSearch] = useState('');
 
   const role = profile?.role;
   const title = [...base, ...(role === 'administrador' ? admin : [])].find(item => item[0] === page)?.[1] || 'Inicio';
@@ -121,6 +135,26 @@ export default function App() {
     return () => { active = false; };
   }, [session, profile, page]);
 
+  useEffect(() => {
+    let active = true;
+    async function loadMaterials() {
+      if (!supabase || !session || !profile || !['materiales', 'precios'].includes(page)) return;
+      setMaterialsLoading(true);
+      const { data, error: materialsError } = await supabase.from('materials').select('id, name, category, sku, unit, supplier, unit_price, currency, active, notes').order('name');
+      if (!active) return;
+      if (materialsError) setError('No se pudo cargar el catálogo. Si aún no ejecutaste la migración de materiales, aplícala en Supabase. Detalle: ' + materialsError.message);
+      else setMaterials((data || []) as Material[]);
+      setMaterialsLoading(false);
+    }
+    void loadMaterials();
+    return () => { active = false; };
+  }, [session, profile, page]);
+
+  const filteredMaterials = useMemo(() => {
+    const term = materialSearch.trim().toLocaleLowerCase();
+    return materials.filter(item => [item.name, item.category, item.sku, item.supplier].some(value => value?.toLocaleLowerCase().includes(term)));
+  }, [materials, materialSearch]);
+
   const filteredClients = useMemo(() => {
     const term = search.trim().toLocaleLowerCase();
     if (!term) return clients;
@@ -129,6 +163,48 @@ export default function App() {
         .some(value => value?.toLocaleLowerCase().includes(term))
     );
   }, [clients, search]);
+
+  function openMaterial(material?: Material) {
+    setEditingMaterial(material || null);
+    setMaterialName(material?.name || '');
+    setMaterialCategory(material?.category || 'Estructura');
+    setMaterialSku(material?.sku || '');
+    setMaterialUnit(material?.unit || 'pieza');
+    setMaterialSupplier(material?.supplier || '');
+    setMaterialPrice(String(material?.unit_price ?? 0));
+    setMaterialCurrency(material?.currency || 'MXN');
+    setMaterialNotes(material?.notes || '');
+    setMaterialModal(true);
+  }
+
+  async function handleSaveMaterial(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase || !session?.user || !materialName.trim()) return;
+    const price = Number(materialPrice);
+    if (!Number.isFinite(price) || price < 0) { setError('Ingresa un precio válido mayor o igual a cero.'); return; }
+    setBusy(true); setError('');
+    const values = { name: materialName.trim(), category: materialCategory, sku: materialSku.trim() || null, unit: materialUnit.trim(), supplier: materialSupplier.trim() || null, unit_price: price, currency: materialCurrency, notes: materialNotes.trim() || null };
+    const query = editingMaterial
+      ? supabase.from('materials').update(values).eq('id', editingMaterial.id)
+      : supabase.from('materials').insert({ ...values, created_by: session.user.id });
+    const { error: saveError } = await query;
+    if (saveError) setError('No se pudo guardar el material: ' + saveError.message);
+    else {
+      const { data } = await supabase.from('materials').select('id, name, category, sku, unit, supplier, unit_price, currency, active, notes').order('name');
+      if (data) setMaterials(data as Material[]);
+      setMaterialModal(false);
+    }
+    setBusy(false);
+  }
+
+  async function toggleMaterial(material: Material) {
+    if (!supabase) return;
+    setBusy(true); setError('');
+    const { error: updateError } = await supabase.from('materials').update({ active: !material.active }).eq('id', material.id);
+    if (updateError) setError('No se pudo actualizar el estado: ' + updateError.message);
+    else setMaterials(current => current.map(item => item.id === material.id ? { ...item, active: !item.active } : item));
+    setBusy(false);
+  }
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
@@ -283,13 +359,21 @@ export default function App() {
               )}
             </section>
           </>}
-          {(['usuarios', 'materiales', 'precios', 'configuracion'] as Page[]).includes(page) && <>
+          {(['materiales', 'precios'] as Page[]).includes(page) && <>
+            {heading('ADMINISTRACIÓN', page === 'materiales' ? 'Administra perfiles, componentes y consumibles utilizados en tus conveyors.' : 'Consulta y actualiza los precios unitarios del catálogo.', page === 'materiales' ? <button className="primary" onClick={() => openMaterial()}><Plus/> Agregar material</button> : undefined)}
+            <section className="panel table">
+              <div className="search"><Search/><input placeholder="Buscar por nombre, categoría, código o proveedor..." value={materialSearch} onChange={event => setMaterialSearch(event.target.value)}/><small>{filteredMaterials.length} registros</small></div>
+              {materialsLoading ? <div className="table-empty">Cargando catálogo…</div> : filteredMaterials.length === 0 ? <div className="table-empty"><Boxes/><b>{materials.length ? 'No hay coincidencias' : 'Catálogo vacío'}</b><span>{materials.length ? 'Prueba con otro término.' : 'Agrega los materiales y componentes que utilizas en tus conveyors.'}</span></div> : <div className="clients-table-wrap"><table className="clients-table"><thead><tr><th>Material</th><th>Categoría</th><th>Código</th><th>Unidad</th><th>Proveedor</th><th>Precio unitario</th><th>Estado</th>{page === 'materiales' && <th>Acciones</th>}</tr></thead><tbody>{filteredMaterials.map(item => <tr key={item.id}><td><b>{item.name}</b></td><td>{item.category}</td><td>{item.sku || '—'}</td><td>{item.unit}</td><td>{item.supplier || '—'}</td><td><b>{new Intl.NumberFormat('es-MX',{style:'currency',currency:item.currency}).format(item.unit_price)}</b></td><td><span className={item.active ? 'status-active' : 'status-inactive'}>{item.active ? 'Activo' : 'Inactivo'}</span></td>{page === 'materiales' && <td><button className="table-action" onClick={() => openMaterial(item)}>Editar</button><button className="table-action" onClick={() => toggleMaterial(item)} disabled={busy}>{item.active ? 'Desactivar' : 'Activar'}</button></td>}</tr>)}</tbody></table></div>}
+            </section>
+          </>}
+          {(['usuarios', 'configuracion'] as Page[]).includes(page) && <>
             {heading('ADMINISTRACIÓN', page === 'usuarios' ? 'Gestiona los accesos y roles de los usuarios.' : page === 'materiales' ? 'Administra el catálogo de materiales disponibles.' : page === 'precios' ? 'Define y actualiza los precios de compra.' : 'Configura las preferencias generales de la plataforma.')}
             <Empty icon={Cog} title="Módulo en preparación" desc="Esta sección se implementará después de validar el acceso, los roles y el directorio de clientes."/>
           </>}
         </div>
         <footer className="foot">CONVEYORQUOTE · Plataforma de cotización <span>Versión 0.2.0 · Supabase</span></footer>
       </main>
+      {materialModal && <div className="overlay" onClick={() => !busy && setMaterialModal(false)}><form className="dialog client-form" onSubmit={handleSaveMaterial} onClick={event => event.stopPropagation()}><button type="button" className="close-dialog" onClick={() => setMaterialModal(false)}><X/></button><small>CATÁLOGO DE MATERIALES</small><h2>{editingMaterial ? 'Editar material' : 'Agregar material'}</h2><p>Registra el material y su precio de compra vigente. Los precios se podrán ajustar posteriormente.</p><label>Nombre *</label><input value={materialName} onChange={event => setMaterialName(event.target.value)} required maxLength={150} placeholder="Ej. PTR 2 x 2 cal. 14"/><div className="form-grid"><div><label>Categoría *</label><select value={materialCategory} onChange={event => setMaterialCategory(event.target.value)}><option>Estructura</option><option>Lámina</option><option>Rodillos</option><option>Rodamientos</option><option>Transmisión</option><option>Motorización</option><option>Eléctrico</option><option>Consumibles</option><option>Otros</option></select></div><div><label>Unidad *</label><select value={materialUnit} onChange={event => setMaterialUnit(event.target.value)}><option>pieza</option><option>metro</option><option>kg</option><option>m²</option><option>juego</option><option>litro</option><option>servicio</option></select></div></div><div className="form-grid"><div><label>Código / SKU</label><input value={materialSku} onChange={event => setMaterialSku(event.target.value)} maxLength={60}/></div><div><label>Proveedor</label><input value={materialSupplier} onChange={event => setMaterialSupplier(event.target.value)} maxLength={120}/></div></div><div className="form-grid"><div><label>Precio unitario *</label><input type="number" min="0" step="0.01" value={materialPrice} onChange={event => setMaterialPrice(event.target.value)} required/></div><div><label>Moneda</label><select value={materialCurrency} onChange={event => setMaterialCurrency(event.target.value as 'MXN' | 'USD')}><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div><label>Notas</label><textarea rows={2} value={materialNotes} onChange={event => setMaterialNotes(event.target.value)} maxLength={1000}/><button className="primary" disabled={busy || !materialName.trim()}>{busy ? 'Guardando…' : 'Guardar material'} <Check/></button></form></div>}
       {modal && <div className="overlay" onClick={() => !busy && setModal(false)}>
         <form className="dialog client-form" onSubmit={handleCreateClient} onClick={event => event.stopPropagation()}>
           <button type="button" className="close-dialog" onClick={() => setModal(false)}><X/></button>

@@ -230,8 +230,8 @@ export default function App() {
   async function handleUserRoleChange(user: UserRecord, nextRole: Role) {
     if (!supabase || role !== 'administrador' || user.id === session?.user.id || user.role === nextRole) return;
     setBusy(true); setError('');
-    const { error: updateError } = await supabase.from('profiles').update({ role: nextRole }).eq('id', user.id);
-    if (updateError) setError('No se pudo actualizar el rol: ' + updateError.message);
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-users', { body: { action: 'update', user_id: user.id, email: user.email || '', full_name: user.full_name || '', role: nextRole } });
+    if (invokeError || data?.error) setError('No se pudo actualizar el rol: ' + (data?.error || invokeError?.message));
     else setUsers(current => current.map(item => item.id === user.id ? { ...item, role: nextRole } : item));
     setBusy(false);
   }
@@ -417,7 +417,7 @@ export default function App() {
               </section>
             </div>
           </>}
-          {page === 'cotizador' && <>{heading('VENTAS', 'Selecciona el tipo de equipo que necesitas configurar.')}<button className="equipment-choice" onClick={() => setPage('banda-modular')}><span><Layers3/></span><div><small>FAMILIA 01</small><h2>Conveyor de Banda Modular</h2><p>Configuración inicial del equipo y preparación de componentes.</p></div><ArrowRight/></button><Empty icon={Calculator} title="Más familias de conveyors" desc="Los siguientes modelos se agregarán conforme avancemos con sus especificaciones."/></>}{page === 'banda-modular' && <>{heading('CONFIGURACIÓN DE EQUIPO', 'Primera familia de conveyor del sistema.')}<ModularBeltConveyor/></>}
+          {page === 'cotizador' && <>{heading('VENTAS', 'Selecciona el tipo de equipo que necesitas configurar.')}<button className="equipment-choice" onClick={() => setPage('banda-modular')}><span><Layers3/></span><div><small>FAMILIA 01</small><h2>Conveyor de Banda Modular</h2><p>Configuración inicial del equipo y preparación de componentes.</p></div><ArrowRight/></button><Empty icon={Calculator} title="Más familias de conveyors" desc="Los siguientes modelos se agregarán conforme avancemos con sus especificaciones."/></>}{page === 'banda-modular' && <>{heading('CONFIGURACIÓN DE EQUIPO', 'Primera familia de conveyor del sistema.')}<ModularBeltConveyor userId={session.user.id}/></>}
           {page === 'clientes' && <>
             {heading('DIRECTORIO', 'Administra los registros de clientes desde ConveyorQuote.', <button className="primary" onClick={() => openClient()}><Plus/> Agregar cliente</button>)}
             <section className="panel table">

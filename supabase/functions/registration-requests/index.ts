@@ -7,8 +7,6 @@ const cors = {
 };
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
-const clean = (value: string) => value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] || char));
-
 Deno.serve(async req => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return reply({ error: "Método no permitido." }, 405);
@@ -31,22 +29,5 @@ Deno.serve(async req => {
   }).select("id").single();
   if (error) return reply({ error: "No se pudo registrar la solicitud." }, 500);
 
-  const resendKey = Deno.env.get("RESEND_API_KEY");
-  const adminEmail = Deno.env.get("ADMIN_NOTIFICATION_EMAIL");
-  const fromEmail = Deno.env.get("RESEND_FROM_EMAIL");
-  if (!resendKey || !adminEmail || !fromEmail) {
-    return reply({ success: true, email_sent: false, message: "Solicitud registrada; falta configurar el servicio de correo para notificar al administrador.", request_id: data.id }, 202);
-  }
-  const html = `<h2>Nueva solicitud de acceso a ConveyorQuote</h2><p><b>Nombre:</b> ${clean(fullName)}</p><p><b>Correo:</b> ${clean(email)}</p><p><b>Empresa:</b> ${clean(company || "No indicada")}</p><p><b>Motivo:</b><br>${clean(reason || "No indicado").replace(/\n/g, "<br>")}</p><p>Solicitud: ${data.id}</p><p>Ingresa a ConveyorQuote para revisar y crear la cuenta si procede.</p>`;
-  const mail = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: fromEmail, to: [adminEmail], subject: "Solicitud de acceso a ConveyorQuote", html }),
-  });
-  if (!mail.ok) {
-    const detail = await mail.text();
-    console.error("Resend delivery failed", mail.status, detail);
-    return reply({ success: true, email_sent: false, message: "La solicitud quedó registrada, pero no se pudo enviar el correo de aviso.", request_id: data.id }, 202);
-  }
-  return reply({ success: true, email_sent: true, request_id: data.id });
+  return reply({ success: true, message: "Solicitud registrada. El administrador podrá revisarla desde ConveyorQuote.", request_id: data.id });
 });

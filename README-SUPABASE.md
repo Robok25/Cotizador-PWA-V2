@@ -58,11 +58,18 @@ La publishable/anon key está diseñada para usarse en el navegador y no sustitu
 
 Reinicia el servidor de desarrollo después de cambiar el archivo.
 
-## 5. Crear usuarios vendedores
+## 5. Activar el catálogo de materiales y precios
+
+En **SQL Editor**, ejecuta también la migración:
+`supabase/migrations/202611260002_materials_catalog.sql`.
+
+Esto crea el catálogo con nombre, categoría, código, unidad, proveedor, precio unitario, moneda, estado y notas. Los usuarios autenticados pueden consultar materiales activos; únicamente administradores pueden crear, editar, activar/desactivar o eliminar registros. La pantalla **Precios** permite revisar los precios del catálogo.
+
+## 6. Crear usuarios vendedores
 
 Por ahora, crea usuarios desde **Authentication → Users → Add user**. El trigger crea su perfil automáticamente como vendedor. La pantalla administrativa para gestionar usuarios se desarrollará después.
 
-## 6. Probar
+## 7. Probar
 
 1. Inicia la aplicación.
 2. Entra con el usuario administrador creado.
